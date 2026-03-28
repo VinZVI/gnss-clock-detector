@@ -3,13 +3,14 @@ from datetime import datetime, timezone
 def _utcnow():
     """Naive UTC datetime для SQLite (SQLAlchemy не хранит tzinfo)."""
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
 from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
 
 
 class SatClock(db.Model):
-    """Сырые clock-записи, загруженные с FTP."""
+    """Сырые clock-записи, загруженные с FTP или NASA CDDIS."""
     __tablename__ = "sat_clock"
 
     id         = db.Column(db.Integer,  primary_key=True)
@@ -59,6 +60,7 @@ class EtlLog(db.Model):
     started_at   = db.Column(db.DateTime, default=_utcnow, index=True)
     finished_at  = db.Column(db.DateTime)
     ftp_file     = db.Column(db.String(120))
+    data_source  = db.Column(db.String(20), default="ftp")    # ftp | nasa | test
     records_raw  = db.Column(db.Integer, default=0)
     records_new  = db.Column(db.Integer, default=0)
     status       = db.Column(db.String(20), default="running")  # running|ok|error

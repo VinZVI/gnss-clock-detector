@@ -110,3 +110,76 @@ def slots_to_fetch(days_back: int, now: datetime | None = None) -> list[tuple[da
         result.append((date_only, t.hour))
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# GPS-неделя (для NASA CDDIS)
+# ---------------------------------------------------------------------------
+# NASA CDDIS использует GPS-неделю в именах файлов:
+#   igu<WWWW><D>_<HH>.sp3.gz  (WWWW=неделя, D=день, HH=слот)
+#   Например: igu26032_00.sp3.gz → неделя 2603, день 2 (вт), слот 00
+
+_GPS_EPOCH = datetime(1980, 1, 6, tzinfo=timezone.utc)
+
+
+def utc_to_gps_week(dt: datetime) -> tuple[int, int]:
+    """
+    Возвращает (gps_week, gps_day_of_week).
+    gps_day_of_week: 0=воскресенье, 1=понедельник … 6=суббота.
+
+    utc_to_gps_week(datetime(2026, 3, 20, tzinfo=UTC)) → (2603, 2)
+    """
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    total_days = (dt - _GPS_EPOCH).days
+    return total_days // 7, total_days % 7
+
+
+def nasa_file_stem(product: str, gps_week: int, gps_dow: int, slot_h: int) -> str:
+    """
+    Формирует основу имени файла NASA CDDIS.
+
+    nasa_file_stem('igu', 2603, 2, 0) → 'igu26032_00'
+    nasa_file_stem('igr', 2603, 2, 0) → 'igr26032'      (rapid — нет слота)
+    nasa_file_stem('igs', 2603, 0, 0) → 'igs26030'      (final — нет слота)
+    """
+    base = f"{product}{gps_week:04d}{gps_dow}"
+    if product == "igu":
+        return f"{base}_{slot_h:02d}"
+    return base
+
+
+def nasa_slots_to_fetch(
+    days_back: int,
+    product: str = "igu",
+    now: datetime | None = None,
+) -> list[tuple[int, int, int]]:
+    """
+    Возвращает список (gps_week, gps_dow, slot_h) за последние days_back дней,
+    от новейшего к старейшему.
+
+    Для 'igu' (ultra-rapid): 4 слота в сутки (00, 06, 12, 18).
+    Для 'igr' (rapid):       1 слот в сутки (slot_h всегда 0).
+    Для 'igs' (final):       1 слот в сутки (slot_h всегда 0).
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    result = []
+
+    if product == "igu":
+        # 4 слота × days_back
+        total_slots = days_back * (24 // SLOT_HOURS)
+        cur = now.replace(hour=slot_for(now), minute=0, second=0, microsecond=0)
+        for i in range(total_slots):
+            t = cur - timedelta(hours=i * SLOT_HOURS)
+            w, d = utc_to_gps_week(t)
+            result.append((w, d, t.hour))
+    else:
+        # 1 файл в сутки
+        for i in range(days_back):
+            t = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=i)
+            w, d = utc_to_gps_week(t)
+            result.append((w, d, 0))
+
+    return result

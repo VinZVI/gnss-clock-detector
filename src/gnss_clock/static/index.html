@@ -4,7 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>GNSS Clock Anomaly Detector</title>
+
+  <!-- Chart.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <!-- Hammer.js (touch events для zoom плагина) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+  <!-- chartjs-plugin-zoom -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
+
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; color: #e6edf3; min-height: 100vh; }
@@ -18,14 +25,21 @@
     .controls { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 18px 22px; display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; margin-bottom: 22px; }
     .field { display: flex; flex-direction: column; gap: 5px; }
     .field label { font-size: .72rem; color: #8b949e; text-transform: uppercase; letter-spacing: .04em; }
-    .field select, .field input { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; padding: 7px 11px; font-size: .88rem; outline: none; transition: border-color .2s; }
+    .field select, .field input[type=date], .field input[type=number] {
+      background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+      color: #e6edf3; padding: 7px 11px; font-size: .88rem; outline: none; transition: border-color .2s;
+    }
     .field select:focus, .field input:focus { border-color: #58a6ff; }
+    .field input[type=number] { width: 70px; }
 
     .btn { padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer; font-size: .88rem; font-weight: 500; transition: opacity .2s; }
     .btn:hover { opacity: .82; }
     .btn-primary   { background: #238636; color: #fff; }
     .btn-secondary { background: #1f6feb; color: #fff; }
     .btn-warn      { background: #9e6a03; color: #fff; }
+    .btn-ghost     { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
+    .btn-ghost:hover { color: #e6edf3; border-color: #58a6ff; }
+    .btn-sm        { padding: 5px 12px; font-size: .78rem; }
 
     .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
     .stat-card  { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 14px 16px; }
@@ -35,8 +49,31 @@
     .stat-card .value.warn   { color: #d29922; }
 
     .card { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 18px; margin-bottom: 20px; }
-    .card h2 { font-size: .88rem; color: #8b949e; margin-bottom: 12px; }
-    canvas { max-height: 300px; }
+    .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px; }
+    .card-header h2 { font-size: .88rem; color: #8b949e; }
+    .chart-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+    /* Кнопки режима взаимодействия */
+    .mode-btn { padding: 4px 10px; border-radius: 5px; border: 1px solid #30363d; background: #0d1117; color: #8b949e; font-size: .75rem; cursor: pointer; transition: all .15s; }
+    .mode-btn.active { background: #1f3a5f; border-color: #58a6ff; color: #58a6ff; }
+    .mode-btn:hover:not(.active) { border-color: #484f58; color: #c9d1d9; }
+
+    /* Подсказка под графиком */
+    .chart-hint { font-size: .72rem; color: #484f58; margin-top: 8px; text-align: center; }
+
+    /* Контейнер с фиксированной высотой для графика */
+    .chart-wrap { position: relative; height: 340px; }
+    .chart-wrap canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; }
+
+    /* MAD-info панель */
+    .mad-info { background: #0d1117; border: 1px solid #21262d; border-radius: 8px; padding: 10px 14px; font-size: .78rem; color: #8b949e; margin-top: 10px; display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+    .mad-info .formula { font-family: monospace; color: #58a6ff; font-size: .82rem; }
+    .mad-info .sensitivity { }
+    .mad-info .sensitivity span { font-weight: 600; }
+    .mad-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-weight: 600; font-size: .72rem; }
+    .mad-badge.loose  { background: #3d2200; color: #d29922; }
+    .mad-badge.normal { background: #1a3a2a; color: #56d364; }
+    .mad-badge.strict { background: #132030; color: #58a6ff; }
 
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: .83rem; }
@@ -61,6 +98,49 @@
     .chip.active { background: #1f3a5f; border-color: #58a6ff; color: #58a6ff; }
     .chip .badge-count { background: #2d333b; border-radius: 8px; padding: 1px 5px; font-size: .67rem; margin-left: 4px; }
     .chip .badge-count.has-anomaly { background: #3d1c1c; color: #f85149; }
+
+    /* Tooltip о MAD */
+    .tooltip-wrap { position: relative; display: inline-block; cursor: help; }
+    .tooltip-wrap .tip { display: none; position: absolute; bottom: 125%; left: 50%; transform: translateX(-50%); background: #1c2128; border: 1px solid #30363d; border-radius: 7px; padding: 10px 14px; font-size: .75rem; color: #c9d1d9; white-space: nowrap; z-index: 100; width: 260px; white-space: normal; line-height: 1.5; }
+    .tooltip-wrap:hover .tip { display: block; }
+    .tip-icon { font-size: .8rem; color: #58a6ff; margin-left: 4px; }
+
+    /* Таблица интерпретации MAD */
+    .mad-table { width: 100%; border-collapse: collapse; font-size: .75rem; margin-top: 8px; }
+    .mad-table th { padding: 5px 8px; text-align: left; color: #484f58; font-weight: 500; border-bottom: 1px solid #21262d; }
+    .mad-table td { padding: 4px 8px; border-bottom: 1px solid #161b22; }
+
+    /* Выделение диапазона — визуальная подсказка */
+    .zoom-overlay-hint { font-size: .7rem; color: #58a6ff; background: #132030; border-radius: 4px; padding: 2px 8px; }
+
+    /* ── Sources panel ───────────────────────────────────────────────── */
+    .sources-panel { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
+    .source-card {
+      flex: 1; min-width: 220px;
+      background: #161b22; border: 1px solid #21262d; border-radius: 10px;
+      padding: 14px 16px; display: flex; flex-direction: column; gap: 6px;
+    }
+    .source-card.active-source { border-color: #238636; }
+    .source-card .src-header { display: flex; align-items: center; justify-content: space-between; }
+    .source-card .src-name { font-size: .82rem; font-weight: 600; color: #e6edf3; }
+    .source-card .src-desc { font-size: .72rem; color: #8b949e; line-height: 1.4; }
+    .src-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+      border-radius: 10px; font-size: .7rem; font-weight: 600; }
+    .src-badge.ok     { background: #1a3a2a; color: #56d364; }
+    .src-badge.warn   { background: #3d2200; color: #d29922; }
+    .src-badge.err    { background: #3d1c1c; color: #f85149; }
+    .src-badge.active { background: #1f3a5f; color: #58a6ff; }
+    .src-stats { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+    .src-stat  { font-size: .72rem; color: #8b949e; }
+    .src-stat span { color: #c9d1d9; font-weight: 500; }
+    .src-actions { display: flex; gap: 6px; margin-top: 6px; }
+
+    /* ETL source badge в таблице */
+    .src-tag { display: inline-block; padding: 1px 6px; border-radius: 8px;
+      font-size: .68rem; font-weight: 600; }
+    .src-tag.ftp  { background: #1f3a5f; color: #58a6ff; }
+    .src-tag.nasa { background: #1a3a2a; color: #56d364; }
+    .src-tag.test { background: #21262d; color: #8b949e; }
   </style>
 </head>
 <body>
@@ -75,7 +155,74 @@
 
 <div class="container">
 
-  <!-- Controls -->
+  <!-- ── Панель источников данных ─────────────────────────────────── -->
+  <div class="sources-panel" id="sourcesPanel">
+
+    <!-- FTP GLONASS-IAC -->
+    <div class="source-card" id="cardFtp">
+      <div class="src-header">
+        <span class="src-name">🛰️ GLONASS-IAC FTP</span>
+        <span class="src-badge warn" id="badgeFtp">…</span>
+      </div>
+      <div class="src-desc">
+        ftp.glonass-iac.ru · Stark_*.clk · 4×/сутки<br>
+        RINEX CLK ultra-rapid, шаг ~5 мин
+      </div>
+      <div class="src-stats" id="statsFtp">
+        <span class="src-stat">Запусков: <span id="ftpRuns">—</span></span>
+        <span class="src-stat">Загружено: <span id="ftpRecords">—</span></span>
+        <span class="src-stat">Последний: <span id="ftpLast">—</span></span>
+      </div>
+    </div>
+
+    <!-- NASA CDDIS -->
+    <div class="source-card" id="cardNasa">
+      <div class="src-header">
+        <span class="src-name">🌍 NASA CDDIS HTTPS</span>
+        <span class="src-badge warn" id="badgeNasa">…</span>
+      </div>
+      <div class="src-desc">
+        cddis.nasa.gov · igu*.sp3.gz · Earthdata Login<br>
+        IGS ultra-rapid SP3, шаг 15 мин
+      </div>
+      <div class="src-stats" id="statsNasa">
+        <span class="src-stat">Продукт: <span id="nasaProduct">—</span></span>
+        <span class="src-stat">Запусков: <span id="nasaRuns">—</span></span>
+        <span class="src-stat">Загружено: <span id="nasaRecords">—</span></span>
+      </div>
+      <div class="src-actions">
+        <button class="btn btn-ghost btn-sm" onclick="checkNasa()" id="btnCheckNasa">
+          Проверить доступ
+        </button>
+      </div>
+    </div>
+
+    <!-- Активный режим -->
+    <div class="source-card" style="min-width:160px;max-width:200px;">
+      <div class="src-header">
+        <span class="src-name">⚙️ Режим</span>
+        <span class="src-badge active" id="badgeActiveMode">—</span>
+      </div>
+      <div class="src-desc">Активный источник данных ETL</div>
+      <div style="margin-top:6px">
+        <div class="field">
+          <label>Источник ETL</label>
+          <select id="etlSourceSelect" onchange="setEtlSource(this.value)">
+            <option value="auto">auto (FTP → NASA)</option>
+            <option value="ftp">ftp (GLONASS-IAC)</option>
+            <option value="nasa">nasa (NASA CDDIS)</option>
+          </select>
+        </div>
+      </div>
+      <div class="src-actions" style="margin-top:8px">
+        <button class="btn btn-primary btn-sm" onclick="triggerEtl()">▶ Запустить ETL</button>
+      </div>
+    </div>
+
+  </div>
+
+
+  <!-- ── Панель управления ──────────────────────────────────────────── -->
   <div class="controls">
     <div class="field">
       <label>От</label>
@@ -85,18 +232,44 @@
       <label>До</label>
       <input type="date" id="dateTo" />
     </div>
-    <button class="btn btn-primary"   onclick="loadSatellites()">Обновить список</button>
+    <div class="field">
+      <label>
+        Порог MAD (k)
+        <span class="tooltip-wrap">
+          <span class="tip-icon">ⓘ</span>
+          <div class="tip">
+            <strong>Порог k для MAD-детекции</strong><br><br>
+            Точка считается аномалией, если:<br>
+            <code>|bias − median| &gt; k × MAD</code><br><br>
+            <table class="mad-table">
+              <tr><th>k</th><th>Чувствительность</th><th>~% аномалий</th></tr>
+              <tr><td>1.5</td><td>Очень высокая</td><td>~13%</td></tr>
+              <tr><td>2.0</td><td>Высокая</td><td>~2.3%</td></tr>
+              <tr><td>2.5</td><td>Средняя</td><td>~1.2%</td></tr>
+              <tr><td><b>3.0</b></td><td><b>Рекомендуется</b></td><td><b>~0.3%</b></td></tr>
+              <tr><td>3.5</td><td>Консервативная</td><td>~0.05%</td></tr>
+              <tr><td>4.0+</td><td>Жёсткая</td><td>&lt;0.01%</td></tr>
+            </table>
+          </div>
+        </span>
+      </label>
+      <input type="number" id="madThreshold" value="3.0" step="0.5" min="1" max="10" />
+    </div>
+    <button class="btn btn-primary" onclick="loadData()">Загрузить</button>
+    <button class="btn btn-secondary" onclick="loadSatellites()">Обновить список</button>
   </div>
 
-  <!-- Satellite chips -->
-  <div class="card" id="satCard">
-    <h2>Спутники — кликните для просмотра</h2>
+  <!-- ── Спутники ───────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Спутники — кликните для просмотра</h2>
+    </div>
     <div class="sat-chips" id="satChips"><span class="empty">Загрузка…</span></div>
   </div>
 
   <div id="status"></div>
 
-  <!-- Stats -->
+  <!-- ── Статистика ────────────────────────────────────────────────── -->
   <div class="stats-grid">
     <div class="stat-card"><div class="label">Спутник</div><div class="value" id="statSat">—</div></div>
     <div class="stat-card"><div class="label">Точек</div><div class="value" id="statTotal">—</div></div>
@@ -106,29 +279,75 @@
     <div class="stat-card"><div class="label">MAD (нс)</div><div class="value" id="statMad">—</div></div>
   </div>
 
-  <!-- Chart -->
-  <div class="card">
-    <h2>Временной ряд clock bias</h2>
-    <canvas id="chart"></canvas>
+  <!-- ── MAD info ───────────────────────────────────────────────────── -->
+  <div class="mad-info" id="madInfo" style="display:none">
+    <span class="formula" id="madFormula"></span>
+    <span class="sensitivity" id="madSensLabel"></span>
   </div>
 
-  <!-- Anomaly table -->
+  <!-- ── График ────────────────────────────────────────────────────── -->
   <div class="card">
-    <h2>Аномальные точки</h2>
+    <div class="card-header">
+      <h2>Временной ряд clock bias</h2>
+      <div class="chart-toolbar">
+        <!-- Режимы -->
+        <button class="mode-btn active" id="btnPan"    onclick="setMode('pan')"  title="Перетаскивание (зажмите и тяните)">✋ Pan</button>
+        <button class="mode-btn"        id="btnZoomX"  onclick="setMode('zoomX')" title="Выделить диапазон по оси X">⟷ Zoom X</button>
+        <button class="mode-btn"        id="btnZoomXY" onclick="setMode('zoomXY')" title="Выделить прямоугольную область">⊡ Zoom XY</button>
+        <div style="width:1px;background:#30363d;height:18px;margin:0 4px"></div>
+        <!-- Масштаб -->
+        <button class="btn btn-ghost btn-sm" onclick="zoomIn()"  title="Приблизить">＋</button>
+        <button class="btn btn-ghost btn-sm" onclick="zoomOut()" title="Отдалить">－</button>
+        <button class="btn btn-ghost btn-sm" onclick="resetZoom()" title="Сбросить масштаб">⟳ Сброс</button>
+        <div style="width:1px;background:#30363d;height:18px;margin:0 4px"></div>
+        <!-- Быстрый выбор диапазона -->
+        <span style="font-size:.72rem;color:#484f58">Показать:</span>
+        <button class="btn btn-ghost btn-sm" onclick="showLast(6)"  >6ч</button>
+        <button class="btn btn-ghost btn-sm" onclick="showLast(24)" >1д</button>
+        <button class="btn btn-ghost btn-sm" onclick="showLast(72)" >3д</button>
+        <button class="btn btn-ghost btn-sm" onclick="showLast(168)">7д</button>
+      </div>
+    </div>
+
+    <div class="chart-wrap">
+      <canvas id="chart"></canvas>
+    </div>
+    <div class="chart-hint" id="chartHint">
+      ✋ Pan — тяните график мышью &nbsp;|&nbsp;
+      🔍 Прокрутка колёсика — zoom по X &nbsp;|&nbsp;
+      ⊡ Zoom X — выделите диапазон
+    </div>
+  </div>
+
+  <!-- ── Таблица аномалий ───────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Аномальные точки <span id="anomCountBadge" style="font-size:.75rem;color:#484f58"></span></h2>
+      <button class="btn btn-ghost btn-sm" onclick="focusAnomalies()" id="btnFocusAnom" style="display:none">🔍 Показать на графике</button>
+    </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Эпоха (UTC)</th><th>Clock Bias (нс)</th><th>Score</th><th>Δ Clock (нс/с)</th></tr></thead>
-        <tbody id="anomalyTable"><tr><td colspan="4" class="empty">Выберите спутник</td></tr></tbody>
+        <thead><tr>
+          <th>Эпоха (UTC)</th>
+          <th>Clock Bias (нс)</th>
+          <th>Score (|x−med|/MAD)</th>
+          <th>Δ Clock (нс/с)</th>
+          <th></th>
+        </tr></thead>
+        <tbody id="anomalyTable"><tr><td colspan="5" class="empty">Выберите спутник</td></tr></tbody>
       </table>
     </div>
   </div>
 
-  <!-- ETL log -->
+  <!-- ── Лог ETL ────────────────────────────────────────────────────── -->
   <div class="card">
-    <h2>Последние запуски ETL <button class="btn btn-warn" style="font-size:.75rem;padding:4px 10px;margin-left:10px" onclick="loadEtlStatus()">Обновить</button></h2>
+    <div class="card-header">
+      <h2>Последние запуски ETL</h2>
+      <button class="btn btn-warn btn-sm" onclick="loadEtlStatus()">Обновить</button>
+    </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Время</th><th>Файл</th><th>Raw</th><th>New</th><th>Статус</th></tr></thead>
+        <thead><tr><th>Время</th><th>Источник</th><th>Файл</th><th>Raw</th><th>New</th><th>Статус</th></tr></thead>
         <tbody id="etlTable"><tr><td colspan="5" class="empty">Загрузка…</td></tr></tbody>
       </table>
     </div>
@@ -137,63 +356,299 @@
 </div>
 
 <script>
-// ── Init dates ────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Состояние
+// ─────────────────────────────────────────────────────────────────────────────
+let chart       = null;
+let _timeseries = [];          // полный ряд
+let _activeSat  = null;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Инициализация дат
+// ─────────────────────────────────────────────────────────────────────────────
 (function() {
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
   const fmt = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}`;
-  const weekAgo = new Date(now - 7*86400*1000);
-  document.getElementById('dateFrom').value = fmt(weekAgo);
+  document.getElementById('dateFrom').value = fmt(new Date(now - 7*86400e3));
   document.getElementById('dateTo').value   = fmt(now);
 })();
 
-// ── Status ────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Обновление MAD-панели при изменении порога
+// ─────────────────────────────────────────────────────────────────────────────
+document.getElementById('madThreshold').addEventListener('input', function() {
+  const k = parseFloat(this.value) || 3;
+  updateMadInfo(k, null, null);
+  if (_timeseries.length > 0) applyThresholdLocally(k);
+});
+
+function updateMadInfo(k, median, mad) {
+  const panel = document.getElementById('madInfo');
+  const fEl   = document.getElementById('madFormula');
+  const sEl   = document.getElementById('madSensLabel');
+  panel.style.display = 'flex';
+
+  let threshold = mad != null ? (k * mad).toFixed(2) + ' нс' : `k × MAD`;
+  fEl.textContent = `Аномалия если: |bias − median| > ${k} × MAD  (порог ≈ ${threshold})`;
+
+  let label, cls;
+  if      (k < 2)   { label = 'Очень высокая (~13% аномалий)'; cls = 'loose'; }
+  else if (k < 2.5) { label = 'Высокая (~2.3% аномалий)';      cls = 'loose'; }
+  else if (k < 3)   { label = 'Средняя (~1.2% аномалий)';      cls = 'loose'; }
+  else if (k < 3.5) { label = 'Рекомендуется (~0.3% аномалий)';cls = 'normal'; }
+  else if (k < 4)   { label = 'Консервативная (~0.05%)';        cls = 'strict'; }
+  else              { label = 'Жёсткая (<0.01%)';               cls = 'strict'; }
+  sEl.innerHTML = `Чувствительность: <span class="mad-badge ${cls}">${label}</span>`;
+}
+
+// Пересчёт аномалий на клиенте при изменении k (без запроса к серверу)
+function applyThresholdLocally(k) {
+  if (!_timeseries.length) return;
+
+  const values = _timeseries.map(p => p.clock_bias);
+  const sorted = [...values].sort((a, b) => a - b);
+  const median = sorted.length % 2 === 0
+    ? (sorted[sorted.length/2 - 1] + sorted[sorted.length/2]) / 2
+    : sorted[Math.floor(sorted.length/2)];
+  const absDevs = values.map(v => Math.abs(v - median));
+  const madSorted = [...absDevs].sort((a, b) => a - b);
+  const mad = madSorted.length % 2 === 0
+    ? (madSorted[madSorted.length/2 - 1] + madSorted[madSorted.length/2]) / 2
+    : madSorted[Math.floor(madSorted.length/2)] || 1e-9;
+
+  _timeseries.forEach((p, i) => {
+    p.score      = parseFloat((absDevs[i] / mad).toFixed(4));
+    p.is_outlier = p.score > k;
+  });
+
+  updateMadInfo(k, median, mad);
+  refreshChartColors();
+  refreshAnomalyTable();
+
+  const n = _timeseries.filter(p => p.is_outlier).length;
+  document.getElementById('statAnom').textContent = n;
+  document.getElementById('statRate').textContent = _timeseries.length
+    ? (n / _timeseries.length * 100).toFixed(1) + '%' : '—';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Статус
+// ─────────────────────────────────────────────────────────────────────────────
 function setStatus(msg, type) {
   const el = document.getElementById('status');
   el.textContent = msg; el.className = type;
 }
 
-// ── Chart ─────────────────────────────────────────────────────────────────
-let chart = null;
+// ─────────────────────────────────────────────────────────────────────────────
+// Инструменты zoom / pan
+// ─────────────────────────────────────────────────────────────────────────────
+let _mode = 'pan';   // 'pan' | 'zoomX' | 'zoomXY'
+
+function setMode(mode) {
+  _mode = mode;
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+  const ids = { pan: 'btnPan', zoomX: 'btnZoomX', zoomXY: 'btnZoomXY' };
+  document.getElementById(ids[mode])?.classList.add('active');
+
+  if (!chart) return;
+  const z = chart.options.plugins.zoom;
+  if (mode === 'pan') {
+    z.pan.enabled  = true;
+    z.zoom.wheel.enabled = true;
+    z.zoom.drag.enabled  = false;
+    z.zoom.mode          = 'x';
+    document.getElementById('chartHint').innerHTML =
+      '✋ Тяните мышью — прокрутка &nbsp;|&nbsp; 🖱️ Колёсико — zoom X';
+  } else if (mode === 'zoomX') {
+    z.pan.enabled  = false;
+    z.zoom.wheel.enabled = false;
+    z.zoom.drag.enabled  = true;
+    z.zoom.mode          = 'x';
+    document.getElementById('chartHint').innerHTML =
+      '⟷ Выделите диапазон по горизонтали &nbsp;|&nbsp; Правый клик — сброс';
+  } else {
+    z.pan.enabled  = false;
+    z.zoom.wheel.enabled = false;
+    z.zoom.drag.enabled  = true;
+    z.zoom.mode          = 'xy';
+    document.getElementById('chartHint').innerHTML =
+      '⊡ Выделите прямоугольную область &nbsp;|&nbsp; Правый клик — сброс';
+  }
+  chart.update('none');
+}
+
+function zoomIn()    { chart?.zoom(1.5); }
+function zoomOut()   { chart?.zoom(0.67); }
+function resetZoom() { chart?.resetZoom(); }
+
+// Показать последние N часов на графике
+function showLast(hours) {
+  if (!chart || !_timeseries.length) return;
+  const last  = new Date(_timeseries[_timeseries.length - 1].epoch);
+  const first = new Date(last - hours * 3600e3);
+  const labels = chart.data.labels;
+  // Находим индексы
+  const iMin = _timeseries.findIndex(p => new Date(p.epoch) >= first);
+  const iMax = _timeseries.length - 1;
+  if (iMin < 0) return resetZoom();
+  chart.zoomScale('x', { min: iMin, max: iMax }, 'default');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Построение графика
+// ─────────────────────────────────────────────────────────────────────────────
+function makeColors(ts)  { return ts.map(p => p.is_outlier ? '#f85149' : '#58a6ff'); }
+function makeSizes(ts)   { return ts.map(p => p.is_outlier ? 7 : 2.5); }
+
 function renderChart(ts) {
   const ctx = document.getElementById('chart').getContext('2d');
   if (chart) chart.destroy();
+
   chart = new Chart(ctx, {
     type: 'line',
     data: {
       labels: ts.map(p => p.epoch.slice(0,16).replace('T',' ')),
       datasets: [{
         label: 'Clock Bias (нс)',
-        data: ts.map(p => p.clock_bias),
-        borderColor: '#1f6feb',
-        borderWidth: 1.5,
-        pointBackgroundColor: ts.map(p => p.is_outlier ? '#f85149' : '#58a6ff'),
-        pointRadius: ts.map(p => p.is_outlier ? 6 : 2.5),
-        tension: 0.2, fill: false,
+        data:  ts.map(p => p.clock_bias),
+        borderColor:        '#1f6feb',
+        borderWidth:        1.5,
+        pointBackgroundColor: makeColors(ts),
+        pointRadius:          makeSizes(ts),
+        pointHoverRadius:     8,
+        tension:            0.2,
+        fill:               false,
       }]
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
       plugins: {
         legend: { labels: { color: '#8b949e' } },
         tooltip: {
           callbacks: {
             label: ctx => {
               const p = ts[ctx.dataIndex];
-              return [` bias: ${p.clock_bias.toFixed(3)} нс`, ` score: ${p.score}`, p.is_outlier ? ' ⚠ АНОМАЛИЯ' : ' ✓ норма'];
+              return [
+                ` bias:  ${p.clock_bias.toFixed(3)} нс`,
+                ` score: ${p.score}`,
+                ` ${p.is_outlier ? '⚠ АНОМАЛИЯ' : '✓ норма'}`,
+              ];
             }
           }
-        }
+        },
+        zoom: {
+          pan: {
+            enabled:  true,
+            mode:     'x',
+            modifierKey: null,
+          },
+          zoom: {
+            wheel:   { enabled: true,  speed: 0.1 },
+            pinch:   { enabled: true },
+            drag: {
+              enabled:    false,
+              backgroundColor: 'rgba(88,166,255,0.12)',
+              borderColor:     '#58a6ff',
+              borderWidth:     1,
+            },
+            mode: 'x',
+            onZoomComplete: ({ chart }) => {
+              const { min, max } = chart.scales.x;
+              const count = Math.round(max - min);
+              document.getElementById('chartHint').innerHTML =
+                `🔍 Показано ${count} точек из ${ts.length} &nbsp;|&nbsp; <a href="#" onclick="resetZoom();return false;" style="color:#58a6ff;">Сбросить</a>`;
+            },
+          },
+        },
       },
       scales: {
-        x: { ticks: { color: '#484f58', maxTicksLimit: 12 }, grid: { color: '#21262d' } },
-        y: { ticks: { color: '#484f58' }, grid: { color: '#21262d' } },
-      }
-    }
+        x: {
+          ticks:  { color: '#484f58', maxTicksLimit: 12 },
+          grid:   { color: '#21262d' },
+        },
+        y: {
+          ticks:  { color: '#484f58' },
+          grid:   { color: '#21262d' },
+        },
+      },
+      // Правый клик — сброс zoom
+      onClick: (e, elements) => {
+        if (e.native?.button === 2) resetZoom();
+      },
+    },
+    plugins: [ChartZoom],
   });
+
+  // Правый клик вне Canvas тоже сбрасывает
+  ctx.canvas.addEventListener('contextmenu', e => { e.preventDefault(); resetZoom(); });
 }
 
-// ── Load satellites ───────────────────────────────────────────────────────
+function refreshChartColors() {
+  if (!chart || !_timeseries.length) return;
+  chart.data.datasets[0].pointBackgroundColor = makeColors(_timeseries);
+  chart.data.datasets[0].pointRadius          = makeSizes(_timeseries);
+  chart.update('none');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Таблица аномалий
+// ─────────────────────────────────────────────────────────────────────────────
+function refreshAnomalyTable() {
+  const tbody = document.getElementById('anomalyTable');
+  const anom  = _timeseries.filter(p => p.is_outlier);
+
+  document.getElementById('anomCountBadge').textContent =
+    anom.length ? `(${anom.length} шт.)` : '';
+  const btn = document.getElementById('btnFocusAnom');
+  btn.style.display = anom.length ? 'inline-block' : 'none';
+
+  if (!anom.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty">Аномалий не обнаружено</td></tr>';
+    return;
+  }
+  tbody.innerHTML = anom.map((p, idx) => `
+    <tr>
+      <td>${p.epoch.replace('T',' ')}</td>
+      <td>${p.clock_bias.toFixed(3)}</td>
+      <td><span class="badge anomaly">${p.score}</span></td>
+      <td>${p.delta_clock != null ? p.delta_clock.toFixed(4) : '—'}</td>
+      <td>
+        <button class="btn btn-ghost btn-sm" onclick="zoomToPoint(${_timeseries.indexOf(p)})"
+          title="Перейти на графике">⤵</button>
+      </td>
+    </tr>`).join('');
+}
+
+// Приблизить к конкретной точке на графике
+function zoomToPoint(idx) {
+  if (!chart) return;
+  const half = 20;
+  const min = Math.max(0, idx - half);
+  const max = Math.min(_timeseries.length - 1, idx + half);
+  chart.zoomScale('x', { min, max }, 'default');
+  // Прокрутить к графику
+  document.getElementById('chart').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// Сфокусировать все аномалии (показать их диапазон)
+function focusAnomalies() {
+  if (!chart || !_timeseries.length) return;
+  const anomIdx = _timeseries
+    .map((p, i) => p.is_outlier ? i : -1)
+    .filter(i => i >= 0);
+  if (!anomIdx.length) return;
+  const min = Math.max(0, anomIdx[0] - 5);
+  const max = Math.min(_timeseries.length - 1, anomIdx[anomIdx.length - 1] + 5);
+  chart.zoomScale('x', { min, max }, 'default');
+  document.getElementById('chart').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Загрузка спутников
+// ─────────────────────────────────────────────────────────────────────────────
 async function loadSatellites() {
   try {
     const res  = await fetch('/api/satellites');
@@ -212,77 +667,90 @@ async function loadSatellites() {
       c.onclick = () => {
         document.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
         c.classList.add('active');
-        loadSeries(s.sat_id);
+        _activeSat = s.sat_id;
+        loadData();
       };
       chips.appendChild(c);
     });
   } catch(e) { setStatus('Ошибка загрузки спутников: ' + e.message, 'error'); }
 }
 
-// ── Load series ───────────────────────────────────────────────────────────
-async function loadSeries(satId) {
-  const from = document.getElementById('dateFrom').value;
-  const to   = document.getElementById('dateTo').value;
+// ─────────────────────────────────────────────────────────────────────────────
+// Загрузка ряда
+// ─────────────────────────────────────────────────────────────────────────────
+async function loadData() {
+  const satId = _activeSat || document.querySelector('.chip.active')?.textContent?.trim()?.split(/\d/)[0];
+  const from  = document.getElementById('dateFrom').value;
+  const to    = document.getElementById('dateTo').value;
+  const k     = parseFloat(document.getElementById('madThreshold').value) || 3.0;
+
+  if (!satId) { setStatus('Выберите спутник', 'error'); return; }
   if (!from || !to) { setStatus('Укажите даты', 'error'); return; }
+
   setStatus('Загрузка…', 'info');
+
   try {
-    const res  = await fetch(`/api/clock-series?sat_id=${satId}&from=${from}&to=${to}`);
+    const res  = await fetch(`/api/clock-series?sat_id=${encodeURIComponent(satId)}&from=${from}&to=${to}`);
     const data = await res.json();
     if (!res.ok) { setStatus(data.error || 'Ошибка API', 'error'); return; }
 
+    _timeseries = data.timeseries;
+
+    // Обновляем стат-карточки
     document.getElementById('statSat').textContent   = satId;
     document.getElementById('statTotal').textContent = data.count;
-    document.getElementById('statAnom').textContent  = data.anomalies;
-    document.getElementById('statRate').textContent  = data.count ? (data.anomalies/data.count*100).toFixed(1)+'%' : '—';
-    document.getElementById('statMed').textContent   = (data.median??0).toFixed(3);
-    document.getElementById('statMad').textContent   = (data.mad??0).toFixed(3);
+    document.getElementById('statMed').textContent   = (data.median ?? 0).toFixed(3);
+    document.getElementById('statMad').textContent   = (data.mad ?? 0).toFixed(3);
 
-    renderChart(data.timeseries);
+    // Применяем пользовательский порог k локально
+    applyThresholdLocally(k);
+    updateMadInfo(k, data.median, data.mad);
 
-    const tbody = document.getElementById('anomalyTable');
-    const anom  = data.timeseries.filter(p => p.is_outlier);
-    if (!anom.length) {
-      tbody.innerHTML = '<tr><td colspan="4" class="empty">Аномалий не обнаружено</td></tr>';
-    } else {
-      tbody.innerHTML = anom.map(p => `
-        <tr>
-          <td>${p.epoch.replace('T',' ')}</td>
-          <td>${p.clock_bias.toFixed(3)}</td>
-          <td><span class="badge anomaly">${p.score}</span></td>
-          <td>${p.delta_clock != null ? p.delta_clock.toFixed(4) : '—'}</td>
-        </tr>`).join('');
-    }
-    setStatus(`${satId}: ${data.count} точек, ${data.anomalies} аномалий`, 'ok');
+    // Строим график
+    renderChart(_timeseries);
+    setMode(_mode);   // восстанавливаем режим
+
+    setStatus(`${satId}: ${data.count} точек загружено`, 'ok');
   } catch(e) { setStatus('Ошибка: ' + e.message, 'error'); }
 }
 
-// ── ETL status ────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// ETL статус
+// ─────────────────────────────────────────────────────────────────────────────
 async function loadEtlStatus() {
   try {
     const res  = await fetch('/api/etl/status');
     const data = await res.json();
     const tbody = document.getElementById('etlTable');
     if (!data.runs?.length) {
-      tbody.innerHTML = '<tr><td colspan="5" class="empty">ETL ещё не запускался</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">ETL ещё не запускался</td></tr>';
       return;
     }
     tbody.innerHTML = data.runs.map(r => {
-      const t = r.started_at ? r.started_at.replace('T',' ').slice(0,19) : '—';
-      const cls = r.status === 'ok' ? 'ok' : 'anomaly';
+      const t      = r.started_at ? r.started_at.replace('T',' ').slice(0,19) : '—';
+      const cls    = r.status === 'ok' ? 'ok' : 'anomaly';
+      const src    = r.data_source || 'ftp';
+      const srcCls = src === 'nasa' ? 'nasa' : src === 'test' ? 'test' : 'ftp';
+      const srcLbl = src === 'nasa' ? '🌍 NASA' : src === 'test' ? '🧪 Test' : '🛰️ FTP';
       return `<tr>
         <td>${t}</td>
-        <td style="font-family:monospace;font-size:.78rem">${r.ftp_file||'—'}</td>
-        <td>${r.records_raw??0}</td>
-        <td>${r.records_new??0}</td>
+        <td><span class="src-tag ${srcCls}">${srcLbl}</span></td>
+        <td style="font-family:monospace;font-size:.78rem">${r.ftp_file || '—'}</td>
+        <td>${r.records_raw  ?? 0}</td>
+        <td>${r.records_new  ?? 0}</td>
         <td><span class="badge ${cls}">${r.status}</span></td>
       </tr>`;
     }).join('');
   } catch(e) { console.error(e); }
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Инициализация
+// ─────────────────────────────────────────────────────────────────────────────
 loadSatellites();
 loadEtlStatus();
+// Инициализировать MAD-info с дефолтным k
+updateMadInfo(parseFloat(document.getElementById('madThreshold').value) || 3.0, null, null);
 </script>
 </body>
 </html>

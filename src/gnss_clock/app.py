@@ -2,20 +2,21 @@
 Flask application factory + REST API.
 
 Endpoints:
-    GET  /                                    → index.html
-    GET  /api/satellites                      → список спутников
-    GET  /api/clock-series                    → временной ряд + аномалии
-    GET  /api/clock-anomalies                 → только аномалии
-    GET  /api/stats/daily                     → суточная сводка
-    GET  /api/etl/status                      → последние запуски ETL
-    POST /api/admin/etl                       → запустить ETL вручную (dev only)
+    GET  /                                         → index.html
+    GET  /api/satellites                           → список спутников
+    GET  /api/clock-series?sat_id=R01&from=&to=   → ряд + аномалии
+    GET  /api/clock-anomalies?sat_id=R01&from=&to= → только выбросы
+    GET  /api/stats/daily?date=YYYY-MM-DD          → суточная сводка
+    GET  /api/etl/status                           → последние 20 запусков ETL
+    GET  /api/sources/status                       → статус источников данных
+    POST /api/admin/etl                            → запустить ETL вручную (dev)
 """
 
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 _utcnow = lambda: datetime.now(timezone.utc).replace(tzinfo=None)
-from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
 from sqlalchemy import func
@@ -39,9 +40,16 @@ def create_app() -> Flask:
     )
 
     db.init_app(app)
-
     with app.app_context():
         db.create_all()
+        # Добавляем колонку data_source если БД была создана раньше
+        try:
+            db.session.execute(
+                db.text("ALTER TABLE etl_log ADD COLUMN data_source VARCHAR(20) DEFAULT 'ftp'")
+            )
+            db.session.commit()
+        except Exception:
+            pass   # колонка уже существует
 
     _register_routes(app)
     return app
@@ -51,7 +59,7 @@ def create_app() -> Flask:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _parse_date_range(args) -> tuple[datetime, datetime] | tuple[None, None]:
+def _parse_date_range(args):
     date_from = args.get("from")
     date_to   = args.get("to")
     if not date_from or not date_to:
@@ -70,8 +78,6 @@ def _parse_date_range(args) -> tuple[datetime, datetime] | tuple[None, None]:
 
 def _register_routes(app: Flask) -> None:
 
-    # ── Frontend ──────────────────────────────────────────────────────────
-
     @app.route("/")
     def index():
         return send_from_directory(app.static_folder, "index.html")
@@ -80,7 +86,6 @@ def _register_routes(app: Flask) -> None:
 
     @app.route("/api/satellites")
     def get_satellites():
-        """GET /api/satellites — список спутников с данными в БД."""
         rows = (
             db.session.query(
                 SatClockAnomaly.sat_id,
@@ -94,9 +99,9 @@ def _register_routes(app: Flask) -> None:
         return jsonify({
             "satellites": [
                 {
-                    "sat_id":    r.sat_id,
-                    "count":     r.count,
-                    "anomalies": r.anomalies or 0,
+                    "sat_id":     r.sat_id,
+                    "count":      r.count,
+                    "anomalies":  r.anomalies or 0,
                     "last_epoch": r.last_epoch.isoformat() if r.last_epoch else None,
                 }
                 for r in sorted(rows, key=lambda x: x.sat_id)
@@ -107,10 +112,6 @@ def _register_routes(app: Flask) -> None:
 
     @app.route("/api/clock-series")
     def clock_series():
-        """
-        GET /api/clock-series?sat_id=R01&from=YYYY-MM-DD&to=YYYY-MM-DD
-        Полный временной ряд с флагами аномалий.
-        """
         sat_id = request.args.get("sat_id")
         from_dt, to_dt = _parse_date_range(request.args)
 
@@ -156,7 +157,6 @@ def _register_routes(app: Flask) -> None:
 
     @app.route("/api/clock-anomalies")
     def clock_anomalies():
-        """GET /api/clock-anomalies?sat_id=R01&from=...&to=... — только выбросы."""
         sat_id = request.args.get("sat_id")
         from_dt, to_dt = _parse_date_range(request.args)
 
@@ -180,11 +180,7 @@ def _register_routes(app: Flask) -> None:
             "sat_id":    sat_id,
             "count":     len(records),
             "anomalies": [
-                {
-                    "epoch":      r.epoch.isoformat(),
-                    "clock_bias": r.clock_bias,
-                    "score":      r.score,
-                }
+                {"epoch": r.epoch.isoformat(), "clock_bias": r.clock_bias, "score": r.score}
                 for r in records
             ],
         })
@@ -193,7 +189,6 @@ def _register_routes(app: Flask) -> None:
 
     @app.route("/api/stats/daily")
     def stats_daily():
-        """GET /api/stats/daily?date=YYYY-MM-DD — сводка по всем спутникам за день."""
         date_str = request.args.get("date", _utcnow().strftime("%Y-%m-%d"))
         try:
             target = datetime.strptime(date_str, "%Y-%m-%d")
@@ -228,40 +223,87 @@ def _register_routes(app: Flask) -> None:
 
     @app.route("/api/etl/status")
     def etl_status():
-        """GET /api/etl/status — последние 20 запусков ETL."""
         logs = EtlLog.query.order_by(EtlLog.started_at.desc()).limit(20).all()
         return jsonify({
             "runs": [
                 {
-                    "id":          l.id,
-                    "started_at":  l.started_at.isoformat() if l.started_at else None,
-                    "finished_at": l.finished_at.isoformat() if l.finished_at else None,
-                    "ftp_file":    l.ftp_file,
-                    "records_raw": l.records_raw,
-                    "records_new": l.records_new,
-                    "status":      l.status,
-                    "message":     l.message,
+                    "id":           l.id,
+                    "started_at":   l.started_at.isoformat()  if l.started_at  else None,
+                    "finished_at":  l.finished_at.isoformat() if l.finished_at else None,
+                    "ftp_file":     l.ftp_file,
+                    "data_source":  getattr(l, "data_source", "ftp"),
+                    "records_raw":  l.records_raw,
+                    "records_new":  l.records_new,
+                    "status":       l.status,
+                    "message":      l.message,
                 }
                 for l in logs
             ]
         })
 
+    # ── Sources status ────────────────────────────────────────────────────
+
+    @app.route("/api/sources/status")
+    def sources_status():
+        """
+        GET /api/sources/status
+        Возвращает статус всех источников данных и конфигурацию.
+        """
+        # Статистика по источникам из EtlLog
+        source_stats = {}
+        try:
+            rows = (
+                db.session.query(
+                    EtlLog.data_source,
+                    func.count(EtlLog.id).label("runs"),
+                    func.sum(EtlLog.records_new).label("records"),
+                    func.max(EtlLog.started_at).label("last_run"),
+                )
+                .filter(EtlLog.status == "ok")
+                .group_by(EtlLog.data_source)
+                .all()
+            )
+            for r in rows:
+                source_stats[r.data_source or "ftp"] = {
+                    "runs":     r.runs,
+                    "records":  int(r.records or 0),
+                    "last_run": r.last_run.isoformat() if r.last_run else None,
+                }
+        except Exception:
+            pass
+
+        return jsonify({
+            "active_source":    config.DATA_SOURCE,
+            "nasa_configured":  bool(config.NASA_USER and config.NASA_PASS),
+            "nasa_product":     config.NASA_PRODUCT,
+            "ftp_host":         config.FTP_HOST,
+            "retain_days":      config.ETL_RETAIN_DAYS,
+            "mad_threshold":    config.MAD_THRESHOLD,
+            "source_stats":     source_stats,
+        })
+
+    # ── NASA credentials check ────────────────────────────────────────────
+
+    @app.route("/api/sources/nasa/check")
+    def nasa_check():
+        """GET /api/sources/nasa/check — проверить доступность NASA CDDIS."""
+        from .nasa_client import check_credentials
+        result = check_credentials()
+        return jsonify(result), (200 if result["ok"] else 503)
+
     # ── Admin: trigger ETL manually ───────────────────────────────────────
 
     @app.route("/api/admin/etl", methods=["POST"])
     def trigger_etl():
-        """
-        POST /api/admin/etl  {"test": true}
-        Только для локальной разработки (не защищён паролем!).
-        """
         if not config.FLASK_DEBUG:
             return jsonify({"error": "Available only in debug mode"}), 403
 
-        body = request.get_json(silent=True) or {}
-        use_test = body.get("test", False)
+        body       = request.get_json(silent=True) or {}
+        use_test   = body.get("test",   False)
+        source     = body.get("source", config.DATA_SOURCE)
 
         from .etl import run_etl
-        stats = run_etl(use_test_data=use_test)
+        stats = run_etl(use_test_data=use_test, source=source)
         return jsonify(stats)
 
     # ── Error handlers ────────────────────────────────────────────────────
