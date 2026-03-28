@@ -745,6 +745,42 @@ async function loadEtlStatus() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Проверка доступа NASA CDDIS
+// ─────────────────────────────────────────────────────────────────────────────
+async function checkNasa() {
+  const btn = document.getElementById('btnCheckNasa');
+  const badge = document.getElementById('badgeNasa');
+  
+  // Show loading state
+  btn.disabled = true;
+  btn.textContent = 'Проверка...';
+  badge.className = 'src-badge warn';
+  badge.textContent = 'Проверка...';
+  
+  try {
+    const res = await fetch('/api/sources/nasa/check');
+    const data = await res.json();
+    
+    if (data.ok) {
+      badge.className = 'src-badge ok';
+      badge.textContent = '✓ Доступен';
+      setStatus(`NASA CDDIS: ${data.message} (${data.auth_method})`, 'ok');
+    } else {
+      badge.className = 'src-badge err';
+      badge.textContent = '✗ Ошибка';
+      setStatus(`NASA CDDIS ошибка: ${data.message}`, 'error');
+    }
+  } catch(e) {
+    badge.className = 'src-badge err';
+    badge.textContent = '✗ Ошибка';
+    setStatus(`Ошибка подключения к NASA: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Проверить доступ';
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Инициализация
 // ─────────────────────────────────────────────────────────────────────────────
 loadSatellites();
