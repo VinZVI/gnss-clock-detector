@@ -18,12 +18,12 @@ FTP-клиент для ftp.glonass-iac.ru/MCC/PRODUCTS/.
   4. Уже загруженные файлы (из EtlLog) пропускаем без скачивания.
 """
 
+from __future__ import annotations
 import ftplib
 import gzip
 import io
 import logging
 from typing import Iterator, Optional
-from __future__ import annotations
 
 from . import config
 from .gps_time import date_to_dir, file_stem, slots_to_fetch
