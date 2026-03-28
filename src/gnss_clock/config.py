@@ -22,7 +22,26 @@ except ImportError:
 # Пути
 # ---------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-DB_PATH  = Path(os.environ.get("GNSS_DB_PATH", BASE_DIR / "db.sqlite3"))
+
+# ---------------------------------------------------------------------------
+# База данных
+# ---------------------------------------------------------------------------
+DB_TYPE = os.environ.get("GNSS_DB_TYPE", "sqlite").lower()
+
+if DB_TYPE == "mysql":
+    # MySQL конфигурация для PythonAnywhere
+    DB_HOST = os.environ.get("GNSS_DB_HOST", "vinzvi.mysql.pythonanywhere-services.com")
+    DB_PORT = int(os.environ.get("GNSS_DB_PORT", "3306"))
+    DB_NAME = os.environ.get("GNSS_DB_NAME", "vinzvi$gnss-clock")
+    DB_USER = os.environ.get("GNSS_DB_USER", "vinzvi")
+    DB_PASS = os.environ.get("GNSS_DB_PASS", "")
+    
+    # SQLAlchemy URI для MySQL
+    DATABASE_URI = f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+else:
+    # SQLite (по умолчанию)
+    DB_PATH = Path(os.environ.get("GNSS_DB_PATH", BASE_DIR / "db.sqlite3"))
+    DATABASE_URI = f"sqlite:///{DB_PATH}"
 
 # ---------------------------------------------------------------------------
 # Источник данных

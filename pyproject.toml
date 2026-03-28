@@ -12,6 +12,7 @@ dependencies = [
     "python-dotenv>=1.0",      # загрузка .env файла
     "unlzw3>=0.2.1",           # Unix LZW decompress для .Z файлов
     "werkzeug>=3.0",
+    "pymysql>=1.1.0",          # MySQL driver для PythonAnywhere
 ]
 
 [project.optional-dependencies]

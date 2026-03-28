@@ -5,8 +5,12 @@ def _utcnow():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 from flask_sqlalchemy import SQLAlchemy
+from . import config
 
 db = SQLAlchemy()
+
+# Инициализация с правильным URI
+app_db = None
 
 
 class SatClock(db.Model):
