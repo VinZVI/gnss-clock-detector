@@ -13,7 +13,9 @@
   Пример: Stark_26032000.clk → 20 марта 2026, 00:00 UTC
 """
 
+from __future__ import annotations
 from datetime import datetime, timezone, timedelta
+from typing import Optional, List, Tuple
 
 SLOT_HOURS = 6   # файлы выходят каждые 6 часов
 
@@ -52,7 +54,7 @@ def slot_for(dt: datetime) -> int:
     return (dt.hour // SLOT_HOURS) * SLOT_HOURS
 
 
-def file_tag(dt: datetime, slot_h: int | None = None) -> str:
+def file_tag(dt: datetime, slot_h: Optional[int] = None) -> str:
     """
     Возвращает YYMMDDHR-тег для имени файла.
 
@@ -83,7 +85,7 @@ def file_stem(prefix: str, dt: datetime, slot_h: int, long_sp3: bool = False) ->
 # Список слотов для загрузки
 # ---------------------------------------------------------------------------
 
-def slots_to_fetch(days_back: int, now: datetime | None = None) -> list[tuple[datetime, int]]:
+def slots_to_fetch(days_back: int, now: Optional[datetime] = None) -> List[Tuple[datetime, int]]:
     """
     Возвращает список (date, slot_h) за последние days_back дней,
     от текущего слота к старым. Каждый элемент — уникальная пара дата+слот.
@@ -152,7 +154,7 @@ def nasa_file_stem(product: str, gps_week: int, gps_dow: int, slot_h: int) -> st
 def nasa_slots_to_fetch(
     days_back: int,
     product: str = "igu",
-    now: datetime | None = None,
+    now: Optional[datetime] = None,
 ) -> list[tuple[int, int, int]]:
     """
     Возвращает список (gps_week, gps_dow, slot_h) за последние days_back дней,

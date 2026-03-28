@@ -8,16 +8,18 @@ MAD-детектор выбросов часов спутников.
   4. Точка — аномалия, если |bias - median| / MAD > threshold.
 """
 
+from __future__ import annotations
 import numpy as np
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Optional
 
 
 @dataclass
 class DetectionResult:
     epoch:       datetime
     clock_bias:  float
-    delta_clock: float | None
+    delta_clock: Optional[float]
     is_outlier:  bool
     score:       float      # |x - median| / MAD
     median:      float

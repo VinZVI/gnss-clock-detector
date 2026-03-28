@@ -9,8 +9,10 @@
     }
 """
 
+from __future__ import annotations
 import logging
 from datetime import datetime
+from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,7 @@ _NO_DATA_THRESHOLD = 999990.0   # значение в SP3, означающее 
 # SP3-c
 # ---------------------------------------------------------------------------
 
-def parse_sp3(content: str, source: str = "glonass-iac") -> list[dict]:
+def parse_sp3(content: str, source: str = "glonass-iac") -> List[Dict[str, Any]]:
     """
     Парсит SP3-c файл.
 
@@ -31,8 +33,8 @@ def parse_sp3(content: str, source: str = "glonass-iac") -> list[dict]:
     clock в SP3 — микросекунды (мкс); 999999.999999 = нет данных.
     Возвращаем в наносекундах (нс = мкс × 1000).
     """
-    records: list[dict] = []
-    epoch: datetime | None = None
+    records: List[Dict[str, Any]] = []
+    epoch: Optional[datetime] = None
 
     for line in content.splitlines():
         # Строка эпохи
@@ -88,7 +90,7 @@ def _fortran_float(s: str) -> float:
     return float(s.strip().upper().replace("D", "E"))
 
 
-def parse_rinex_clk(content: str, source: str = "glonass-iac") -> list[dict]:
+def parse_rinex_clk(content: str, source: str = "glonass-iac") -> List[Dict[str, Any]]:
     """
     Парсит RINEX Clock файл (версия 2.x и 3.x).
 
@@ -103,7 +105,7 @@ def parse_rinex_clk(content: str, source: str = "glonass-iac") -> list[dict]:
     clock_bias в секундах → нс (* 1e9).
     Берём только строки AS (Satellite Clock); AR (station) игнорируем.
     """
-    records: list[dict] = []
+    records: List[Dict[str, Any]] = []
     in_data = False
 
     for raw_line in content.splitlines():

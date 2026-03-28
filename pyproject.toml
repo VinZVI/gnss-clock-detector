@@ -2,7 +2,7 @@
 name = "gnss-clock"
 version = "0.2.0"
 description = "GNSS satellite clock anomaly detector — GLONASS-IAC FTP + NASA CDDIS → SQLite → Flask API"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
     "flask>=3.0",
     "flask-sqlalchemy>=3.1",
