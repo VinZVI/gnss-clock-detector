@@ -1,9 +1,9 @@
 # GNSS Clock Anomaly Detector
 
 MAD-based обнаружение аномалий в часах навигационных спутников.  
-Источник данных: `ftp://ftp.glonass-iac.ru/MCC/PRODUCTS/<WWWWD>/ultra/`
+Источники данных: **GLONASS-IAC FTP** + **NASA CDDIS HTTPS**
 
-**Стек:** Flask · SQLAlchemy · SQLite · numpy · Chart.js · uv
+**Стек:** Flask · SQLAlchemy · SQLite · numpy · requests · Chart.js · uv
 
 ---
 
@@ -11,60 +11,164 @@ MAD-based обнаружение аномалий в часах навигаци
 
 ```
 gnss-clock-detector/
+├── .env.example                # шаблон переменных окружения → скопируйте в .env
+├── .gitignore                  # .env и db.sqlite3 не коммитятся
 ├── pyproject.toml              # манифест uv-проекта
 ├── wsgi.py                     # WSGI entry point (PythonAnywhere)
 ├── src/
 │   └── gnss_clock/
-│       ├── config.py           # все настройки (env-vars)
+│       ├── config.py           # все настройки (dotenv + env-vars)
 │       ├── models.py           # SQLAlchemy: SatClock, SatClockAnomaly, EtlLog
-│       ├── gps_time.py         # GPS-неделя ↔ UTC, имена файлов
-│       ├── ftp_client.py       # FTP-загрузчик с дедупликацией
+│       ├── gps_time.py         # YYYYDDD/YYMMDDHR + GPS-неделя для NASA
+│       ├── ftp_client.py       # FTP-загрузчик GLONASS-IAC
+│       ├── nasa_client.py      # HTTPS-загрузчик NASA CDDIS (Earthdata Login)
 │       ├── parsers.py          # SP3-c и RINEX CLK парсеры
 │       ├── detector.py         # MAD-детектор
-│       ├── etl.py              # pipeline + CLI
+│       ├── etl.py              # pipeline: ftp | nasa | auto + CLI
 │       ├── app.py              # Flask app factory + REST API
-│       └── static/index.html  # Dashboard (Chart.js)
+│       └── static/index.html   # Dashboard (Chart.js + zoom/pan)
 └── tests/
-    ├── test_gps_time.py
-    ├── test_parsers.py
-    └── test_detector.py
+    ├── test_gps_time.py        # YYYYDDD, YYMMDDHR, GPS-неделя
+    ├── test_parsers.py         # SP3, RINEX CLK (D-нотация, CRLF)
+    ├── test_nasa_client.py     # URL-генерация, декомпрессия, mock HTTP
+    └── test_detector.py        # MAD-детектор
 ```
 
 ---
 
-## Формат файлов на FTP
+## Формат файлов
 
+### GLONASS-IAC FTP
 ```
-/MCC/PRODUCTS/<WWWWD>/ultra/
-    Stark_<WWWWD><HH>.clk       ← RINEX CLK, ~5 мин, ~500 KB  ✓ приоритет
-    Stark_<WWWWD><HH>.sp3       ← SP3 ultra-rapid, ~80 KB
-    Stark_1D_<WWWWD><HH>.sp3    ← SP3 1-day
+ftp://ftp.glonass-iac.ru/MCC/PRODUCTS/<YYYYDDD>/ultra/
+    Stark_<YYMMDDHR>.clk    ← RINEX CLK, ~5 мин, ~500 KB  ✓ приоритет
+    Stark_<YYMMDDHR>.sp3    ← SP3 ultra-rapid, ~80 KB
+    Stark_1D_<YYMMDDHR>.sp3 ← SP3 1-day, ~326 KB
+```
+Примеры каталогов: `26079` (20 марта 2026), файлов: `Stark_26032000.clk`
+
+### NASA CDDIS HTTPS
+```
+https://cddis.nasa.gov/archive/gnss/products/<WWWW>/
+    COD0OPSULT_20260860600_02D_05M_ORB.SP3.gz  ← SP3 ultra-rapid (COD), 5 мин
+    COD0OPSULT_20260860600_02D_05M_CLK.CLK.gz  ← RINEX CLK (COD), 5 мин
+    EMR0OPSULT_...                              ← другие анализ центры (EMR, GFZ, ...)
+    igr<WWWW><D>.sp3.gz                         ← rapid (daily)
+```
+`WWWW` = GPS-неделя, `D` = день (0=вс…6=сб), формат имени: `YYYYDOYHHMM_02D_05M`
+
+**Поддерживаемые анализ центры:** COD, EMR, GFZ, TUG, SHA, JPL, MIT, ESA
+
+> ⚠️ **Важно:** В 2026 году NASA использует формат IGS3 с 5-минутным интервалом (`05M`), а не 15-минутным. Клиент автоматически пробует файлы от разных анализ центров.
+
+---
+
+## Настройка (.env)
+
+```bash
+# Скопировать шаблон
+cp .env.example .env
 ```
 
-`WWWW` = GPS-неделя, `D` = день (0=вс…6=сб), `HH` = слот (00/06/12/18 UTC).  
-Файлы без сжатия (в отличие от IGS, которые дают `.Z`).
+Ключевые переменные в `.env`:
+
+```ini
+# Источник: ftp | nasa | auto (FTP → NASA fallback)
+GNSS_DATA_SOURCE=auto
+
+# NASA Earthdata Login — https://urs.earthdata.nasa.gov/users/new
+NASA_EARTHDATA_USER=your_login
+NASA_EARTHDATA_PASS=your_password
+NASA_PRODUCT=igu                # igu | igr | igs
+
+# FTP (дефолты подходят для анонимного доступа)
+GNSS_FTP_HOST=ftp.glonass-iac.ru
+
+# ETL
+GNSS_ETL_DAYS_BACK=3
+GNSS_ETL_RETAIN_DAYS=14
+GNSS_MAD_THRESHOLD=3.0
+
+# Flask
+FLASK_DEBUG=1
+SECRET_KEY=change-me-in-production
+```
 
 ---
 
 ## Быстрый старт (локально)
 
+### Установка uv
+
 ```bash
-# 1. Установить uv (если нет)
+# macOS / Linux
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 2. Создать venv и установить зависимости
-cd gnss-clock-detector
+# Windows (PowerShell)
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+### Если uv не может подключиться к PyPI (Windows, ошибка 10054)
+
+Проблема: корпоративный прокси, VPN или антивирус разрывает TLS-соединение.
+
+**Вариант 1 — указать TLS-версию:**
+```bash
+# Установить переменную перед uv
+set UV_NATIVE_TLS=1
+uv venv && uv pip install -e ".[dev]"
+```
+
+**Вариант 2 — через pip (если uv заблокирован):**
+```bash
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+# или: source .venv/bin/activate  # Linux/macOS
+pip install -e ".[dev]"
+```
+
+**Вариант 3 — зеркало PyPI (если основной заблокирован):**
+```bash
+uv pip install -e ".[dev]" --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+# или
+pip install -e ".[dev]" -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+**Вариант 4 — скачать wheels вручную** (для полностью изолированной сети):
+```bash
+# На машине с интернетом:
+pip download flask flask-sqlalchemy sqlalchemy numpy requests python-dotenv unlzw3 werkzeug -d ./wheels
+
+# Перенести папку wheels, затем:
+pip install --no-index --find-links=./wheels -e .
+```
+
+### Нормальный запуск (когда сеть работает)
+
+```bash
+# 1. Создать окружение и установить зависимости
 uv venv
 uv pip install -e ".[dev]"
 
-# 3. Тесты
-uv run pytest
+# 2. Настроить .env
+cp .env.example .env
+# Отредактировать .env: добавить NASA_EARTHDATA_USER/PASS
 
-# 4. Тестовые данные (без FTP)
+# 3. Тесты
+uv run pytest -v
+# или без uv:
+python -m pytest tests/ -v
+
+# 4. Заполнить БД тестовыми данными (без сети)
 uv run python -m gnss_clock.etl --test
 
-# 5. Запуск сервера
-FLASK_DEBUG=1 uv run python wsgi.py
+# 5. Или загрузить с реального FTP
+uv run python -m gnss_clock.etl --source ftp --days 3
+
+# 6. Запустить сервер
+set FLASK_DEBUG=1   # Windows
+# export FLASK_DEBUG=1  # Linux/macOS
+uv run python wsgi.py
 # → http://127.0.0.1:5000
 ```
 
@@ -73,23 +177,16 @@ FLASK_DEBUG=1 uv run python wsgi.py
 ## ETL CLI
 
 ```bash
-uv run python -m gnss_clock.etl              # FTP, последние 3 дня
-uv run python -m gnss_clock.etl --days 7     # FTP, 7 дней
-uv run python -m gnss_clock.etl --test       # синтетика (без FTP)
-uv run python -m gnss_clock.etl --no-anomaly # только загрузка
+uv run python -m gnss_clock.etl                       # авто-источник, 3 дня
+uv run python -m gnss_clock.etl --source ftp          # только GLONASS-IAC FTP
+uv run python -m gnss_clock.etl --source nasa         # только NASA CDDIS
+uv run python -m gnss_clock.etl --source auto         # FTP → NASA fallback
+uv run python -m gnss_clock.etl --days 7              # глубина 7 дней
+uv run python -m gnss_clock.etl --test                # синтетика без сети
+uv run python -m gnss_clock.etl --no-anomaly          # только загрузка
 ```
 
-Переменные окружения:
-```
-GNSS_FTP_HOST        ftp.glonass-iac.ru
-GNSS_FTP_BASE        /MCC/PRODUCTS
-GNSS_FTP_SUBDIR      ultra
-GNSS_PRODUCT_PREFIX  Stark
-GNSS_ETL_DAYS_BACK   3
-GNSS_ETL_RETAIN_DAYS 14
-GNSS_MAD_THRESHOLD   3.0
-GNSS_DB_PATH         ./db.sqlite3
-```
+Все параметры читаются из `.env`, флаги CLI перекрывают `.env`.
 
 ---
 
@@ -102,14 +199,16 @@ GNSS_DB_PATH         ./db.sqlite3
 | GET | `/api/clock-anomalies?sat_id=R01&from=...&to=...` | Только выбросы |
 | GET | `/api/stats/daily?date=YYYY-MM-DD` | Суточная сводка |
 | GET | `/api/etl/status` | Последние 20 запусков ETL |
-| POST | `/api/admin/etl` | Ручной запуск ETL (только debug mode) |
+| GET | `/api/sources/status` | Статус источников + конфигурация |
+| GET | `/api/sources/nasa/check` | Live-проверка кредов NASA CDDIS |
+| POST | `/api/admin/etl` | Ручной запуск ETL (только `FLASK_DEBUG=1`) |
 
 ---
 
 ## Деплой на PythonAnywhere (paid ≥ $5/мес)
 
-> **Free plan не подходит**: FTP заблокирован whitelist-ом.  
-> Нужен минимум Developer/Hacker план ($5/мес) — unrestricted internet.
+> **Free plan не подходит**: FTP заблокирован whitelist-ом, NASA CDDIS тоже.  
+> Нужен минимум Hacker план ($5/мес) — unrestricted internet.
 
 ```bash
 # 1. Bash console на PythonAnywhere
@@ -122,38 +221,96 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # 3. Создать venv и установить пакет
 uv venv .venv
 uv pip install -e .
-uv pip install unlzw3   # распаковка .Z если понадобится
 
-# 4. Первый запуск ETL (проверка FTP)
-.venv/bin/python -m gnss_clock.etl --days 3
+# 4. Настроить .env
+cp .env.example .env
+nano .env   # заполнить NASA_EARTHDATA_USER, NASA_EARTHDATA_PASS
 
-# 5. Web app
+# 5. Первый запуск ETL
+.venv/bin/python -m gnss_clock.etl --source auto --days 3
+
+# 6. Web app
 #    Web → Add new web app → Flask
 #    Source code: /home/<user>/gnss-clock-detector
 #    WSGI file:   /home/<user>/gnss-clock-detector/wsgi.py
 #    Virtualenv:  /home/<user>/gnss-clock-detector/.venv
 
-# 6. Scheduled task (hourly)
+# 7. Scheduled task (hourly)
 #    Tasks → каждый час
-#    Command: /home/<user>/gnss-clock-detector/.venv/bin/python -m gnss_clock.etl
+#    /home/<user>/gnss-clock-detector/.venv/bin/python -m gnss_clock.etl
 ```
 
-### Дисковый бюджет (paid 1 GB)
+### Дисковый бюджет (paid 512 MB)
 
-| Файл | Размер |
-|------|--------|
-| `.clk` за 1 сутки (4 файла × 500 KB) | ~2 MB |
-| `.sp3` за 1 сутки (4 файла × 80 KB) | ~320 KB |
-| SQLite (14 дней, ~5 спутников, 5 мин шаг) | ~15 MB |
-
-Всего на диске — **< 50 MB** при `GNSS_ETL_RETAIN_DAYS=14`.
+| Данные | Размер |
+|--------|--------|
+| `.clk` GLONASS-IAC за 1 сутки (4 × 500 KB) | ~2 MB |
+| `.sp3.gz` NASA IGU за 1 сутки (4 × ~80 KB) | ~320 KB |
+| SQLite (14 дней, 54 спутника, 5-мин шаг) | ~80 MB |
+| Итого при `RETAIN_DAYS=14` | **< 90 MB** |
 
 ---
 
-## Примечания по архитектуре ETL
+## Архитектура ETL
 
-**Проблема**: файлы выходят каждые 6 часов, scheduled task раз в час.  
-**Решение**: `EtlLog` хранит имена загруженных файлов.  
-`iter_new_files()` сначала запрашивает `already_loaded` из БД, потом сравнивает  
-с листингом FTP — скачивает только новые.  
-Стоимость холостого запуска: 1 FTP-соединение + `NLST` за каждый каталог ≈ **< 1 сек**.
+```
+┌─────────────────┐    ┌──────────────────┐
+│  GLONASS-IAC    │    │   NASA CDDIS     │
+│  ftp_client.py  │    │  nasa_client.py  │
+│  (FTP, анон.)   │    │  (HTTPS, OAuth)  │
+└────────┬────────┘    └────────┬─────────┘
+         │                      │
+         └──────────┬───────────┘
+                    ▼
+              etl.py (auto/ftp/nasa)
+                    │
+           parsers.py (SP3 / RINEX CLK)
+           Fortran D-нотация ✓ CRLF ✓
+                    │
+              db.sqlite3
+            (SatClock сырые)
+                    │
+            detector.py (MAD)
+                    │
+         SatClockAnomaly + EtlLog
+                    │
+              Flask REST API
+                    │
+            Dashboard (Chart.js)
+            zoom/pan, MAD-threshold UI
+            панель источников
+```
+
+**Дедупликация:** `EtlLog.ftp_file` хранит имена уже загруженных файлов.  
+Холостой запуск ETL: 1 соединение + NLST ≈ **< 1 сек**.
+
+---
+
+## Changelog
+
+### [Unreleased] — 2026-03-28
+
+**🎯 NASA CDDIS Client Fixed**
+- ✏️ Исправлен формат имён файлов для NASA ultra-rapid продуктов (2026)
+- ✅ Теперь используется правильный формат IGS3: `05M` (5-минутный) вместо `15M`
+- ✅ Добавлена поддержка 8 анализ центров: COD, EMR, GFZ, TUG, SHA, JPL, MIT, ESA
+- ✅ Корректный формат timestamp: `YYYYDOYHHMM` вместо `YYYYDOYHHMMSS`
+- 📊 Успешная загрузка: 10 файлов, 237,468 записей за 3 дня
+
+**Примеры имён файлов:**
+- SP3: `COD0OPSULT_20260860600_02D_05M_ORB.SP3.gz`
+- CLK: `COD0OPSULT_20260860600_02D_05M_CLK.CLK.gz`
+
+---
+
+## Регистрация NASA Earthdata
+
+1. Перейти на https://urs.earthdata.nasa.gov/users/new
+2. Создать аккаунт (бесплатно)
+3. Добавить приложение: Apps → Approve More Applications → **NASA CDDIS**
+4. Прописать в `.env`:
+   ```ini
+   NASA_EARTHDATA_USER=your_username
+   NASA_EARTHDATA_PASS=your_password
+   ```
+5. Проверить: `GET /api/sources/nasa/check` или кнопка **«Проверить доступ»** в UI
