@@ -22,7 +22,8 @@ import ftplib
 import gzip
 import io
 import logging
-from typing import Iterator
+from typing import Iterator, Optional
+from __future__ import annotations
 
 from . import config
 from .gps_time import date_to_dir, file_stem, slots_to_fetch
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 # Decompress
 # ---------------------------------------------------------------------------
 
-def _decompress(data: bytes, filename: str) -> str | None:
+def _decompress(data: bytes, filename: str) -> Optional[str]:
     lo = filename.lower()
 
     if lo.endswith(".z"):
@@ -78,7 +79,7 @@ def _list_dir(ftp: ftplib.FTP, path: str) -> list[str]:
     return names
 
 
-def _download(ftp: ftplib.FTP, name: str) -> bytes | None:
+def _download(ftp: ftplib.FTP, name: str) -> Optional[bytes]:
     buf = io.BytesIO()
     try:
         ftp.retrbinary(f"RETR {name}", buf.write)
@@ -94,7 +95,7 @@ def _download(ftp: ftplib.FTP, name: str) -> bytes | None:
 # Кандидаты по приоритету для одного слота
 # ---------------------------------------------------------------------------
 
-def _candidates(dt, slot_h: int) -> list[tuple[str, str | None]]:
+def _candidates(dt, slot_h: int) -> List[Tuple[str, Optional[str]]]:
     """
     Возвращает [(имя_файла, суффикс_сжатия|None), ...] в порядке приоритета.
 

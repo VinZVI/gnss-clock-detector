@@ -16,6 +16,7 @@ HTTPS-клиент для NASA CDDIS.
   https://urs.earthdata.nasa.gov/documentation/for_users/user_token
 """
 
+from __future__ import annotations
 import base64
 import gzip
 import io
@@ -41,7 +42,7 @@ _TOKEN_CACHE   = Path(__file__).resolve().parent.parent.parent / ".token_cache"
 # Bearer Token: получение и дисковый кеш (60 дней)
 # ---------------------------------------------------------------------------
 
-def _get_bearer_token() -> str | None:
+def _get_bearer_token() -> Optional[str]:
     """
     Возвращает Bearer token. Порядок:
       1. NASA_EARTHDATA_TOKEN из .env (ручной)
@@ -130,7 +131,7 @@ class _BasicRedirectSession(requests.Session):
                 del prepared_request.headers["Authorization"]
 
 
-def _make_session() -> requests.Session | None:
+def _make_session() -> Optional[requests.Session]:
     """Bearer (предпочтительно) → Basic redirect → None."""
     if not config.NASA_USER and not config.NASA_TOKEN:
         logger.warning("NASA_EARTHDATA_USER / NASA_EARTHDATA_TOKEN не заданы в .env")
@@ -228,7 +229,7 @@ def _candidate_urls(gps_week: int, gps_dow: int, slot_h: int) -> list[tuple[str,
 # Скачивание + распаковка
 # ---------------------------------------------------------------------------
 
-def _decompress(data: bytes, filename: str) -> str | None:
+def _decompress(data: bytes, filename: str) -> Optional[str]:
     lo = filename.lower()
     try:
         if lo.endswith(".gz"):
@@ -245,7 +246,7 @@ def _decompress(data: bytes, filename: str) -> str | None:
     return data.decode("utf-8", errors="replace")
 
 
-def _download_url(session: requests.Session, url: str, fname: str) -> bytes | None:
+def _download_url(session: requests.Session, url: str, fname: str) -> Optional[bytes]:
     try:
         resp = session.get(url, timeout=config.NASA_TIMEOUT, stream=True)
 
