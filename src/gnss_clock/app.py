@@ -34,7 +34,7 @@ def create_app() -> Flask:
     app = Flask(__name__, static_folder=str(static_dir), static_url_path="/static")
 
     app.config.update(
-        SQLALCHEMY_DATABASE_URI        = config.DATABASE_URI,
+        SQLALCHEMY_DATABASE_URI        = f"sqlite:///{config.DB_PATH}",
         SQLALCHEMY_TRACK_MODIFICATIONS = False,
         SECRET_KEY                     = config.SECRET_KEY,
     )

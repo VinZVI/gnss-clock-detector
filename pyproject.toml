@@ -1,18 +1,18 @@
 [project]
 name = "gnss-clock"
-version = "0.2.0"
+version = "0.3.0"
 description = "GNSS satellite clock anomaly detector — GLONASS-IAC FTP + NASA CDDIS → SQLite → Flask API"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
-    "flask>=3.0",
+    "flask>=3.1",
     "flask-sqlalchemy>=3.1",
     "sqlalchemy>=2.0",
-    "numpy>=1.26",
-    "requests>=2.31",          # HTTPS-загрузка NASA CDDIS
-    "python-dotenv>=1.0",      # загрузка .env файла
-    "unlzw3>=0.2.1",           # Unix LZW decompress для .Z файлов
-    "werkzeug>=3.0",
-    "pymysql>=1.1.0",          # MySQL driver для PythonAnywhere
+    "numpy>=2.0",
+    "requests>=2.32",
+    "python-dotenv>=1.0",
+    "unlzw3>=0.2.1",
+    "werkzeug>=3.1",
+    "gunicorn>=23.0",
 ]
 
 [project.optional-dependencies]
@@ -35,7 +35,7 @@ packages = ["src/gnss_clock"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
