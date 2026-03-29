@@ -15,7 +15,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 from gnss_clock.app import create_app
 
-application = create_app()
+# Create Flask application
+app = create_app()
+
+# WSGI compatible name
+application = app
 
 if __name__ == "__main__":
     from gnss_clock import config
