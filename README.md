@@ -246,11 +246,11 @@ git push origin main
    ```
    FLASK_DEBUG=0
    SECRET_KEY=<random-secret-key>
-   GNSS_DATA_SOURCE=ftp
+   GNSS_DATA_SOURCE=nasa              # ← Use NASA only (FTP blocked on Render)
    GNSS_ETL_DAYS_BACK=3
    GNSS_ETL_RETAIN_DAYS=14
    GNSS_MAD_THRESHOLD=3.0
-   NASA_EARTHDATA_USER=<your-nasa-user>
+   NASA_EARTHDATA_USER=<your-nasa-username>
    NASA_EARTHDATA_PASS=<your-nasa-password>
    ```
 
@@ -261,10 +261,12 @@ git push origin main
 После деплоя:
 
 1. Открыть консоль: **Shell** tab на Render dashboard
-2. Выполнить:
+2. Выполнить (используем NASA CDDIS):
    ```bash
-   python -m gnss_clock.etl --source ftp --days 3
+   python -m gnss_clock.etl --source nasa --days 3
    ```
+
+> ⚠️ **Важно:** FTP может быть заблокирован на Render, поэтому используем только NASA CDDIS.
 
 ### Шаг 4: Автоматизация ETL
 
