@@ -34,9 +34,10 @@ def create_app() -> Flask:
     app = Flask(__name__, static_folder=str(static_dir), static_url_path="/static")
 
     app.config.update(
-        SQLALCHEMY_DATABASE_URI        = f"sqlite:///{config.DB_PATH}",
+        SQLALCHEMY_DATABASE_URI        = config.DATABASE_URI,
         SQLALCHEMY_TRACK_MODIFICATIONS = False,
         SECRET_KEY                     = config.SECRET_KEY,
+        SQLALCHEMY_ENGINE_OPTIONS      = config.SQLALCHEMY_ENGINE_OPTIONS,
     )
 
     db.init_app(app)
@@ -295,16 +296,21 @@ def _register_routes(app: Flask) -> None:
 
     @app.route("/api/admin/etl", methods=["POST"])
     def trigger_etl():
-        if not config.FLASK_DEBUG:
-            return jsonify({"error": "Available only in debug mode"}), 403
+        # Allow in production if SECRET_KEY is set (Render.com)
+        # Only block if explicitly disabled
+        if os.environ.get("GNSS_DISABLE_ADMIN_ETL", "").lower() == "true":
+            return jsonify({"error": "Admin ETL endpoint disabled"}), 403
 
         body       = request.get_json(silent=True) or {}
         use_test   = body.get("test",   False)
         source     = body.get("source", config.DATA_SOURCE)
 
         from .etl import run_etl
-        stats = run_etl(use_test_data=use_test, source=source)
-        return jsonify(stats)
+        try:
+            stats = run_etl(use_test_data=use_test, source=source)
+            return jsonify(stats)
+        except Exception as e:
+            return jsonify({"error": str(e), "details": repr(e)}), 500
 
     # ── Error handlers ────────────────────────────────────────────────────
 

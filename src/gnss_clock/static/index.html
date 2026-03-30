@@ -781,6 +781,44 @@ async function checkNasa() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Запуск ETL через API
+// ─────────────────────────────────────────────────────────────────────────────
+async function triggerEtl() {
+  const source = document.getElementById('etlSourceSelect')?.value || 'nasa';
+  
+  if (!confirm(`Запустить ETL из источника "${source}"?\n\nЭто может занять несколько минут.`)) {
+    return;
+  }
+  
+  setStatus('Запуск ETL...', 'info');
+  
+  try {
+    const res = await fetch('/api/admin/etl', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: source, days: 3 })
+    });
+    
+    const data = await res.json();
+    
+    if (!res.ok) {
+      throw new Error(data.error || 'ETL failed');
+    }
+    
+    setStatus(`ETL завершён: ${data.records_raw || 0} записей, ${data.anomalies || 0} аномалий`, 'ok');
+    
+    // Обновить статус и список спутников
+    setTimeout(() => {
+      loadEtlStatus();
+      loadSatellites();
+    }, 2000);
+    
+  } catch(e) {
+    setStatus('Ошибка ETL: ' + e.message, 'error');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Инициализация
 // ─────────────────────────────────────────────────────────────────────────────
 loadSatellites();

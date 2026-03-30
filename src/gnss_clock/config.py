@@ -22,7 +22,28 @@ except ImportError:
 # Пути
 # ---------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-DB_PATH  = Path(os.environ.get("GNSS_DB_PATH", BASE_DIR / "db.sqlite3"))
+
+# ---------------------------------------------------------------------------
+# База данных
+# ---------------------------------------------------------------------------
+DB_TYPE = os.environ.get("GNSS_DB_TYPE", "sqlite").lower()
+
+if DB_TYPE == "postgresql":
+    # PostgreSQL для production (Render.com, etc.)
+    DATABASE_URL = os.environ.get("DATABASE_URL", "")
+    if not DATABASE_URL:
+        raise ValueError("DATABASE_URL required for PostgreSQL")
+    DATABASE_URI = DATABASE_URL
+else:
+    # SQLite (по умолчанию)
+    DB_PATH = Path(os.environ.get("GNSS_DB_PATH", BASE_DIR / "db.sqlite3"))
+    DATABASE_URI = f"sqlite:///{DB_PATH}"
+
+# Engine options для лучшей производительности
+SQLALCHEMY_ENGINE_OPTIONS = {
+    'pool_pre_ping': True,
+    'pool_recycle': 3600,
+}
 
 # ---------------------------------------------------------------------------
 # Источник данных
