@@ -783,6 +783,8 @@ async function checkNasa() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Запуск ETL через API
 // ─────────────────────────────────────────────────────────────────────────────
+let etlPollingInterval = null;
+
 async function triggerEtl() {
   const source = document.getElementById('etlSourceSelect')?.value || 'nasa';
   
@@ -805,17 +807,52 @@ async function triggerEtl() {
       throw new Error(data.error || 'ETL failed');
     }
     
-    setStatus(`ETL завершён: ${data.records_raw || 0} записей, ${data.anomalies || 0} аномалий`, 'ok');
+    setStatus('ETL запущен... Ожидание завершения', 'info');
     
-    // Обновить статус и список спутников
-    setTimeout(() => {
-      loadEtlStatus();
-      loadSatellites();
-    }, 2000);
+    // Start polling for status
+    startEtlPolling();
     
   } catch(e) {
     setStatus('Ошибка ETL: ' + e.message, 'error');
   }
+}
+
+function startEtlPolling() {
+  let attempts = 0;
+  const maxAttempts = 120; // 2 minutes (poll every second)
+  
+  clearInterval(etlPollingInterval);
+  
+  etlPollingInterval = setInterval(async () => {
+    attempts++;
+    
+    try {
+      const res = await fetch('/api/admin/etl/status');
+      const data = await res.json();
+      
+      if (data.status === 'completed') {
+        clearInterval(etlPollingInterval);
+        const result = data.result || {};
+        setStatus(
+          `ETL завершён: ${result.records_raw || 0} записей, ${result.anomalies || 0} аномалий`,
+          'ok'
+        );
+        setTimeout(() => {
+          loadEtlStatus();
+          loadSatellites();
+        }, 500);
+      } else if (data.status === 'failed') {
+        clearInterval(etlPollingInterval);
+        setStatus(`Ошибка ETL: ${data.error}`, 'error');
+      } else if (attempts >= maxAttempts) {
+        clearInterval(etlPollingInterval);
+        setStatus('ETL выполняется слишком долго. Обновите страницу для проверки статуса.', 'warn');
+      }
+      // else still running, continue polling
+    } catch(e) {
+      console.error('Polling error:', e);
+    }
+  }, 1000); // Poll every second
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -69,7 +69,7 @@ NASA_BASE_URL = os.environ.get(
     "NASA_BASE_URL",
     "https://cddis.nasa.gov/archive/gnss/products"   # старый URL (всё ещё работает через редирект)
 )
-NASA_TIMEOUT  = int(os.environ.get("NASA_TIMEOUT", "60"))
+NASA_TIMEOUT  = int(os.environ.get("NASA_TIMEOUT", "120"))  # Increased for cloud deployments
 
 # ---------------------------------------------------------------------------
 # FTP GLONASS-IAC

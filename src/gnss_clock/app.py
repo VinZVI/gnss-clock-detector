@@ -13,6 +13,7 @@ Endpoints:
 """
 
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -294,6 +295,9 @@ def _register_routes(app: Flask) -> None:
 
     # ── Admin: trigger ETL manually ───────────────────────────────────────
 
+    # Global state for background ETL
+    _etl_running = {'status': None, 'progress': 0, 'error': None}
+
     @app.route("/api/admin/etl", methods=["POST"])
     def trigger_etl():
         # Allow in production if SECRET_KEY is set (Render.com)
@@ -304,13 +308,46 @@ def _register_routes(app: Flask) -> None:
         body       = request.get_json(silent=True) or {}
         use_test   = body.get("test",   False)
         source     = body.get("source", config.DATA_SOURCE)
+        days       = int(body.get("days", 3))
 
-        from .etl import run_etl
-        try:
-            stats = run_etl(use_test_data=use_test, source=source)
-            return jsonify(stats)
-        except Exception as e:
-            return jsonify({"error": str(e), "details": repr(e)}), 500
+        # Check if already running
+        if _etl_running.get('status') == 'running':
+            return jsonify({"error": "ETL already running", "progress": _etl_running.get('progress', 0)}), 409
+
+        # Run ETL in background thread to avoid timeout
+        def run_etl_background():
+            _etl_running['status'] = 'running'
+            _etl_running['progress'] = 0
+            _etl_running['error'] = None
+            
+            try:
+                from .etl import run_etl
+                stats = run_etl(use_test_data=use_test, source=source, days_back=days)
+                _etl_running['status'] = 'completed'
+                _etl_running['progress'] = 100
+                _etl_running['result'] = stats
+            except Exception as e:
+                _etl_running['status'] = 'failed'
+                _etl_running['error'] = str(e)
+                _etl_running['details'] = repr(e)
+                logger = logging.getLogger(__name__)
+                logger.error(f"Background ETL failed: {e}", exc_info=True)
+
+        # Start background thread
+        thread = threading.Thread(target=run_etl_background, daemon=True)
+        thread.start()
+
+        return jsonify({
+            "status": "started",
+            "message": "ETL started in background",
+            "source": source,
+            "days": days
+        }), 202
+
+    @app.route("/api/admin/etl/status", methods=["GET"])
+    def etl_status():
+        """Get status of background ETL job"""
+        return jsonify(_etl_running)
 
     # ── Error handlers ────────────────────────────────────────────────────
 
