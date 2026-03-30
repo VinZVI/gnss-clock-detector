@@ -345,7 +345,7 @@ def _register_routes(app: Flask) -> None:
         }), 202
 
     @app.route("/api/admin/etl/status", methods=["GET"])
-    def etl_status():
+    def admin_etl_status():
         """Get status of background ETL job"""
         return jsonify(_etl_running)
 

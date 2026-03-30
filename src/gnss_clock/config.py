@@ -32,8 +32,14 @@ if DB_TYPE == "postgresql":
     # PostgreSQL для production (Render.com, etc.)
     DATABASE_URL = os.environ.get("DATABASE_URL", "")
     if not DATABASE_URL:
-        raise ValueError("DATABASE_URL required for PostgreSQL")
-    DATABASE_URI = DATABASE_URL
+        # Fall back to SQLite if DATABASE_URL not set
+        import warnings
+        warnings.warn("GNSS_DB_TYPE=postgresql but DATABASE_URL not set. Using SQLite.")
+        DB_PATH = Path(os.environ.get("GNSS_DB_PATH", BASE_DIR / "db.sqlite3"))
+        DATABASE_URI = f"sqlite:///{DB_PATH}"
+        DB_TYPE = "sqlite"  # Override type
+    else:
+        DATABASE_URI = DATABASE_URL
 else:
     # SQLite (по умолчанию)
     DB_PATH = Path(os.environ.get("GNSS_DB_PATH", BASE_DIR / "db.sqlite3"))
