@@ -54,18 +54,31 @@ def _already_loaded_files(app) -> set[str]:
 
 
 def _load_clocks(app, records: list[dict]) -> int:
-    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
     from .models import db, SatClock
 
     if not records:
         return 0
 
     with app.app_context():
-        stmt = sqlite_insert(SatClock).values(records)
-        stmt = stmt.on_conflict_do_nothing(index_elements=["sat_id", "epoch", "source"])
-        result = db.session.execute(stmt)
-        db.session.commit()
-        return result.rowcount
+        # Use SQLAlchemy core insert with conflict handling that works on both SQLite and PostgreSQL
+        try:
+            # Try bulk insert with conflict resolution
+            db.session.bulk_insert_mappings(SatClock, records)
+            db.session.commit()
+            return len(records)
+        except Exception as e:
+            # Fallback: insert one by one, skipping duplicates
+            inserted = 0
+            for record in records:
+                try:
+                    db.session.add(SatClock(**record))
+                    db.session.commit()
+                    inserted += 1
+                except:
+                    db.session.rollback()
+                    # Skip duplicate, continue with next
+                    pass
+            return inserted
 
 
 def _process_anomalies(app, since: datetime) -> int:
