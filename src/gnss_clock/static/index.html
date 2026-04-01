@@ -277,6 +277,9 @@
   <div class="card">
     <div class="card-header">
       <h2>Спутники — кликните для просмотра</h2>
+      <button class="btn btn-secondary btn-sm" onclick="recalculateAllAnomalies()" title="Пересчитать аномалии разными методами">
+        🔄 Пересчитать методы
+      </button>
     </div>
     <div class="sat-chips" id="satChips"><span class="empty">Загрузка…</span></div>
   </div>
@@ -702,6 +705,41 @@ async function loadSatellites() {
   } catch(e) { setStatus('Ошибка загрузки спутников: ' + e.message, 'error'); }
 }
 
+// Recalculate anomalies for all satellites with both methods
+async function recalculateAllAnomalies() {
+  if (!confirm('Пересчитать аномалии для всех спутников обоими методами (bias и delta)?\n\nЭто займёт несколько минут.')) {
+    return;
+  }
+  
+  setStatus('Пересчёт аномалий...', 'info');
+  
+  try {
+    const res = await fetch('/api/admin/recalculate-anomalies', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    const data = await res.json();
+    
+    if (!res.ok) {
+      throw new Error(data.error || 'Recalculation failed');
+    }
+    
+    setStatus(
+      `Готово! Обработано ${data.satellites_processed || 0} КА, ` +
+      `метод bias: ${data.bias_count || 0} записей, ` +
+      `метод delta: ${data.delta_count || 0} записей`,
+      'ok'
+    );
+    
+    // Refresh satellite list
+    setTimeout(() => loadSatellites(), 1000);
+    
+  } catch(e) {
+    setStatus('Ошибка пересчёта: ' + e.message, 'error');
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Загрузка ряда
 // ─────────────────────────────────────────────────────────────────────────────
@@ -782,6 +820,9 @@ function updateSourceBadges(latestRun) {
   const ftpBadge = document.getElementById('badgeFtp');
   const nasaBadge = document.getElementById('badgeNasa');
   
+  // Update FTP/NASA statistics from all runs
+  updateSourceStats();
+  
   if (!latestRun) {
     ftpBadge.className = 'src-badge warn';
     ftpBadge.textContent = 'Нет данных';
@@ -810,6 +851,43 @@ function updateSourceBadges(latestRun) {
     nasaBadge.className = 'src-badge warn';
     nasaBadge.textContent = 'Не используется';
   }
+}
+
+// Update source statistics (runs, records, last run)
+function updateSourceStats() {
+  fetch('/api/etl/status')
+    .then(res => res.json())
+    .then(data => {
+      if (!data.runs?.length) return;
+      
+      // Count by source
+      const ftpRuns = data.runs.filter(r => (r.data_source || 'ftp') === 'ftp');
+      const nasaRuns = data.runs.filter(r => r.data_source === 'nasa');
+      
+      // FTP stats
+      document.getElementById('ftpRuns').textContent = ftpRuns.length;
+      const ftpRecords = ftpRuns.reduce((sum, r) => sum + (r.records_raw || 0), 0);
+      document.getElementById('ftpRecords').textContent = ftpRecords.toLocaleString();
+      if (ftpRuns.length > 0) {
+        const last = new Date(ftpRuns[0].started_at);
+        document.getElementById('ftpLast').textContent = last.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+      }
+      
+      // NASA stats
+      const nasaStatsEl = document.getElementById('statsNasa');
+      if (nasaStatsEl && !nasaStatsEl.querySelector('.src-stat')) {
+        // Create NASA stats if they don't exist
+        nasaStatsEl.innerHTML = `
+          <span class="src-stat">Запусков: <span id="nasaRuns">${nasaRuns.length}</span></span>
+          <span class="src-stat">Загружено: <span id="nasaRecords">${nasaRuns.reduce((sum, r) => sum + (r.records_raw || 0), 0).toLocaleString()}</span></span>
+        `;
+      } else {
+        document.getElementById('nasaRuns').textContent = nasaRuns.length;
+        const nasaRecords = nasaRuns.reduce((sum, r) => sum + (r.records_raw || 0), 0);
+        document.getElementById('nasaRecords').textContent = nasaRecords.toLocaleString();
+      }
+    })
+    .catch(err => console.error('Failed to load source stats:', err));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

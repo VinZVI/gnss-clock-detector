@@ -32,19 +32,20 @@ class SatClockAnomaly(db.Model):
     """Результаты MAD-детекции аномалий."""
     __tablename__ = "sat_clock_anomaly"
 
-    id           = db.Column(db.Integer,  primary_key=True)
-    sat_id       = db.Column(db.String(10), nullable=False, index=True)
-    epoch        = db.Column(db.DateTime,   nullable=False, index=True)
-    clock_bias   = db.Column(db.Float,      nullable=False)     # нс
-    delta_clock  = db.Column(db.Float)                          # нс/с
-    is_outlier   = db.Column(db.Boolean,    default=False, index=True)
-    score        = db.Column(db.Float)                          # |x-med|/MAD
-    median       = db.Column(db.Float)
-    mad          = db.Column(db.Float)
-    processed_at = db.Column(db.DateTime,   default=_utcnow)
+    id              = db.Column(db.Integer,  primary_key=True)
+    sat_id          = db.Column(db.String(10), nullable=False, index=True)
+    epoch           = db.Column(db.DateTime,   nullable=False, index=True)
+    clock_bias      = db.Column(db.Float,      nullable=False)     # нс
+    delta_clock     = db.Column(db.Float)                          # нс/с
+    is_outlier      = db.Column(db.Boolean,    default=False, index=True)
+    score           = db.Column(db.Float)                          # |x-med|/MAD
+    median          = db.Column(db.Float)
+    mad             = db.Column(db.Float)
+    detection_method = db.Column(db.String(10), default='bias')   # 'bias' or 'delta'
+    processed_at    = db.Column(db.DateTime,   default=_utcnow)
 
     __table_args__ = (
-        db.UniqueConstraint("sat_id", "epoch", name="uix_anomaly_sat_epoch"),
+        db.UniqueConstraint("sat_id", "epoch", "detection_method", name="uix_anomaly_sat_epoch_method"),
     )
 
     def __repr__(self):

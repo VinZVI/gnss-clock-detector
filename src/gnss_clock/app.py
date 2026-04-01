@@ -44,14 +44,20 @@ def create_app() -> Flask:
     db.init_app(app)
     with app.app_context():
         db.create_all()
-        # Добавляем колонку data_source если БД была создана раньше
+        # Добавляем колонку detection_method если БД была создана раньше
         try:
             db.session.execute(
-                db.text("ALTER TABLE etl_log ADD COLUMN data_source VARCHAR(20) DEFAULT 'ftp'")
+                db.text("ALTER TABLE sat_clock_anomaly ADD COLUMN detection_method VARCHAR(10) DEFAULT 'bias'")
             )
             db.session.commit()
         except Exception:
             pass   # колонка уже существует
+        # Обновляем unique constraint
+        try:
+            db.session.execute(db.text("DROP INDEX IF EXISTS uix_anomaly_sat_epoch"))
+            db.session.commit()
+        except Exception:
+            pass
 
     _register_routes(app)
     return app
@@ -350,6 +356,130 @@ def _register_routes(app: Flask) -> None:
     def admin_etl_status():
         """Get status of background ETL job"""
         return jsonify(_etl_running)
+
+    @app.route("/api/admin/recalculate-anomalies", methods=["POST"])
+    def recalculate_anomalies():
+        """Recalculate anomalies for all satellites with both methods (bias & delta)"""
+        if os.environ.get("GNSS_DISABLE_ADMIN_ETL", "").lower() == "true":
+            return jsonify({"error": "Admin endpoint disabled"}), 403
+        
+        try:
+            from .models import SatClock, SatClockAnomaly, db
+            from .detector import detect_outliers
+            from datetime import datetime, timezone
+            
+            # Get all unique satellite IDs
+            sat_ids = [r[0] for r in db.session.query(SatClock.sat_id).distinct().all()]
+            
+            total_processed = 0
+            total_bias = 0
+            total_delta = 0
+            
+            for sat_id in sat_ids:
+                # Get all clock data for this satellite
+                clocks = (
+                    SatClock.query
+                    .filter(SatClock.sat_id == sat_id)
+                    .order_by(SatClock.epoch)
+                    .all()
+                )
+                
+                if not clocks:
+                    continue
+                
+                # Prepare timeseries for detection
+                timeseries = [
+                    {"epoch": c.epoch, "clock_bias": c.clock_bias}
+                    for c in clocks
+                ]
+                
+                # Detect with bias method
+                results_bias = detect_outliers(timeseries, threshold=3.0, method='bias')
+                
+                # Detect with delta method
+                results_delta = detect_outliers(timeseries, threshold=3.0, method='delta')
+                
+                # Save bias method results
+                for r in results_bias:
+                    existing = SatClockAnomaly.query.filter_by(
+                        sat_id=sat_id,
+                        epoch=r.epoch,
+                        detection_method='bias'
+                    ).first()
+                    
+                    if existing:
+                        # Update existing
+                        existing.clock_bias = r.clock_bias
+                        existing.delta_clock = r.delta_clock
+                        existing.is_outlier = r.is_outlier
+                        existing.score = r.score
+                        existing.median = r.median
+                        existing.mad = r.mad
+                    else:
+                        # Insert new
+                        anomaly = SatClockAnomaly(
+                            sat_id=sat_id,
+                            epoch=r.epoch,
+                            clock_bias=r.clock_bias,
+                            delta_clock=r.delta_clock,
+                            is_outlier=r.is_outlier,
+                            score=r.score,
+                            median=r.median,
+                            mad=r.mad,
+                            detection_method='bias'
+                        )
+                        db.session.add(anomaly)
+                        total_bias += 1
+                
+                # Save delta method results
+                for r in results_delta:
+                    existing = SatClockAnomaly.query.filter_by(
+                        sat_id=sat_id,
+                        epoch=r.epoch,
+                        detection_method='delta'
+                    ).first()
+                    
+                    if existing:
+                        # Update existing
+                        existing.clock_bias = r.clock_bias
+                        existing.delta_clock = r.delta_clock
+                        existing.is_outlier = r.is_outlier
+                        existing.score = r.score
+                        existing.median = r.median
+                        existing.mad = r.mad
+                    else:
+                        # Insert new
+                        anomaly = SatClockAnomaly(
+                            sat_id=sat_id,
+                            epoch=r.epoch,
+                            clock_bias=r.clock_bias,
+                            delta_clock=r.delta_clock,
+                            is_outlier=r.is_outlier,
+                            score=r.score,
+                            median=r.median,
+                            mad=r.mad,
+                            detection_method='delta'
+                        )
+                        db.session.add(anomaly)
+                        total_delta += 1
+                
+                total_processed += 1
+            
+            db.session.commit()
+            
+            return jsonify({
+                "status": "ok",
+                "satellites_processed": total_processed,
+                "bias_count": total_bias,
+                "delta_count": total_delta,
+                "message": f"Processed {total_processed} satellites"
+            })
+            
+        except Exception as e:
+            db.session.rollback()
+            logger = logging.getLogger(__name__)
+            logger.error(f"Recalculation failed: {e}", exc_info=True)
+            return jsonify({"error": str(e), "details": repr(e)}), 500
 
     # ── Error handlers ────────────────────────────────────────────────────
 
