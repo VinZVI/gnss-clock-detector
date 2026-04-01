@@ -115,6 +115,7 @@ def _register_routes(app: Flask) -> None:
     @app.route("/api/clock-series")
     def clock_series():
         sat_id = request.args.get("sat_id")
+        method = request.args.get("method", "bias")  # 'bias' or 'delta'
         from_dt, to_dt = _parse_date_range(request.args)
 
         if not sat_id:
@@ -143,6 +144,7 @@ def _register_routes(app: Flask) -> None:
             "anomalies":  sum(1 for r in records if r.is_outlier),
             "median":     first.median,
             "mad":        first.mad,
+            "method":     method,
             "timeseries": [
                 {
                     "epoch":       r.epoch.isoformat(),

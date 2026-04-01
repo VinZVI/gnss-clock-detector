@@ -239,8 +239,10 @@
           <span class="tip-icon">ⓘ</span>
           <div class="tip">
             <strong>Порог k для MAD-детекции</strong><br><br>
-            Точка считается аномалией, если:<br>
-            <code>|bias − median| &gt; k × MAD</code><br><br>
+            Точка считается аномалией если:<br>
+            <code>|bias − median| &gt; k × MAD</code> (Bias method)<br>
+            или<br>
+            <code>|delta − median| &gt; k × MAD</code> (Delta method)<br><br>
             <table class="mad-table">
               <tr><th>k</th><th>Чувствительность</th><th>~% аномалий</th></tr>
               <tr><td>1.5</td><td>Очень высокая</td><td>~13%</td></tr>
@@ -250,10 +252,22 @@
               <tr><td>3.5</td><td>Консервативная</td><td>~0.05%</td></tr>
               <tr><td>4.0+</td><td>Жёсткая</td><td>&lt;0.01%</td></tr>
             </table>
+            <br>
+            <strong>Mетоды:</strong><br>
+            • <b>Bias</b>: детекция по отклонению значений часов<br>
+            • <b>Delta</b>: детекция по отклонению скорости изменений
           </div>
         </span>
       </label>
       <input type="number" id="madThreshold" value="3.0" step="0.5" min="1" max="10" />
+    </div>
+        
+    <div class="field">
+      <label>Метод MAD</label>
+      <select id="madMethod">
+        <option value="bias">Bias (classic)</option>
+        <option value="delta">Delta (rate-based)</option>
+      </select>
     </div>
     <button class="btn btn-primary" onclick="loadData()">Загрузить</button>
     <button class="btn btn-secondary" onclick="loadSatellites()">Обновить список</button>
@@ -383,14 +397,27 @@ document.getElementById('madThreshold').addEventListener('input', function() {
   if (_timeseries.length > 0) applyThresholdLocally(k);
 });
 
+document.getElementById('madMethod').addEventListener('change', function() {
+  const k = parseFloat(document.getElementById('madThreshold').value) || 3;
+  updateMadInfo(k, null, null);
+  if (_timeseries.length > 0) loadData(); // Reload with new method
+});
+
 function updateMadInfo(k, median, mad) {
   const panel = document.getElementById('madInfo');
   const fEl   = document.getElementById('madFormula');
   const sEl   = document.getElementById('madSensLabel');
+  const method = document.getElementById('madMethod')?.value || 'bias';
+  
   panel.style.display = 'flex';
 
   let threshold = mad != null ? (k * mad).toFixed(2) + ' нс' : `k × MAD`;
-  fEl.textContent = `Аномалия если: |bias − median| > ${k} × MAD  (порог ≈ ${threshold})`;
+  
+  if (method === 'delta') {
+    fEl.textContent = `Аномалия если: |delta − median| > ${k} × MAD  (порог ≈ ${threshold} нс/с)`;
+  } else {
+    fEl.textContent = `Аномалия если: |bias − median| > ${k} × MAD  (порог ≈ ${threshold})`;
+  }
 
   let label, cls;
   if      (k < 2)   { label = 'Очень высокая (~13% аномалий)'; cls = 'loose'; }
@@ -683,6 +710,7 @@ async function loadData() {
   const from  = document.getElementById('dateFrom').value;
   const to    = document.getElementById('dateTo').value;
   const k     = parseFloat(document.getElementById('madThreshold').value) || 3.0;
+  const method = document.getElementById('madMethod')?.value || 'bias';
 
   if (!satId) { setStatus('Выберите спутник', 'error'); return; }
   if (!from || !to) { setStatus('Укажите даты', 'error'); return; }
@@ -690,7 +718,7 @@ async function loadData() {
   setStatus('Загрузка…', 'info');
 
   try {
-    const res  = await fetch(`/api/clock-series?sat_id=${encodeURIComponent(satId)}&from=${from}&to=${to}`);
+    const res  = await fetch(`/api/clock-series?sat_id=${encodeURIComponent(satId)}&from=${from}&to=${to}&method=${method}`);
     const data = await res.json();
     if (!res.ok) { setStatus(data.error || 'Ошибка API', 'error'); return; }
 
@@ -724,6 +752,8 @@ async function loadEtlStatus() {
     const tbody = document.getElementById('etlTable');
     if (!data.runs?.length) {
       tbody.innerHTML = '<tr><td colspan="6" class="empty">ETL ещё не запускался</td></tr>';
+      // Update badges to show no data
+      updateSourceBadges(null);
       return;
     }
     tbody.innerHTML = data.runs.map(r => {
@@ -741,7 +771,45 @@ async function loadEtlStatus() {
         <td><span class="badge ${cls}">${r.status}</span></td>
       </tr>`;
     }).join('');
+    
+    // Update source badges based on latest run
+    updateSourceBadges(data.runs[0]);
   } catch(e) { console.error(e); }
+}
+
+// Update source status badges
+function updateSourceBadges(latestRun) {
+  const ftpBadge = document.getElementById('badgeFtp');
+  const nasaBadge = document.getElementById('badgeNasa');
+  
+  if (!latestRun) {
+    ftpBadge.className = 'src-badge warn';
+    ftpBadge.textContent = 'Нет данных';
+    nasaBadge.className = 'src-badge warn';
+    nasaBadge.textContent = 'Нет данных';
+    return;
+  }
+  
+  const src = latestRun.data_source || 'ftp';
+  const statusOk = latestRun.status === 'ok';
+  
+  // Update FTP badge
+  if (src === 'ftp') {
+    ftpBadge.className = `src-badge ${statusOk ? 'ok' : 'err'}`;
+    ftpBadge.textContent = statusOk ? '✓ Активен' : '✗ Ошибка';
+  } else {
+    ftpBadge.className = 'src-badge warn';
+    ftpBadge.textContent = 'Не используется';
+  }
+  
+  // Update NASA badge
+  if (src === 'nasa') {
+    nasaBadge.className = `src-badge ${statusOk ? 'ok' : 'err'}`;
+    nasaBadge.textContent = statusOk ? '✓ Активен' : '✗ Ошибка';
+  } else {
+    nasaBadge.className = 'src-badge warn';
+    nasaBadge.textContent = 'Не используется';
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
