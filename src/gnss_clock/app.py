@@ -14,6 +14,7 @@ Endpoints:
 
 import os
 import threading
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -52,12 +53,42 @@ def create_app() -> Flask:
             db.session.commit()
         except Exception:
             pass   # колонка уже существует
-        # Обновляем unique constraint
+        
+        # Обновляем unique constraint - удаляем старый и создаём новый
         try:
+            # PostgreSQL: DROP INDEX IF EXISTS
             db.session.execute(db.text("DROP INDEX IF EXISTS uix_anomaly_sat_epoch"))
             db.session.commit()
+        except Exception as e:
+            # SQLite doesn't support DROP INDEX IF EXISTS without quotes
+            try:
+                db.session.execute(db.text('DROP INDEX IF EXISTS "uix_anomaly_sat_epoch"'))
+                db.session.commit()
+            except Exception:
+                pass  # Индекс уже удалён или не существует
+        
+        # Создаём новый unique constraint с detection_method
+        try:
+            # PostgreSQL syntax
+            db.session.execute(
+                db.text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uix_anomaly_sat_epoch_method "
+                    "ON sat_clock_anomaly(sat_id, epoch, detection_method)"
+                )
+            )
+            db.session.commit()
         except Exception:
-            pass
+            try:
+                # SQLite syntax
+                db.session.execute(
+                    db.text(
+                        'CREATE UNIQUE INDEX IF NOT EXISTS "uix_anomaly_sat_epoch_method" '
+                        'ON sat_clock_anomaly(sat_id, epoch, detection_method)'
+                    )
+                )
+                db.session.commit()
+            except Exception:
+                pass  # Индекс уже существует
 
     _register_routes(app)
     return app
@@ -401,67 +432,77 @@ def _register_routes(app: Flask) -> None:
                 
                 # Save bias method results
                 for r in results_bias:
-                    existing = SatClockAnomaly.query.filter_by(
-                        sat_id=sat_id,
-                        epoch=r.epoch,
-                        detection_method='bias'
-                    ).first()
-                    
-                    if existing:
-                        # Update existing
-                        existing.clock_bias = r.clock_bias
-                        existing.delta_clock = r.delta_clock
-                        existing.is_outlier = r.is_outlier
-                        existing.score = r.score
-                        existing.median = r.median
-                        existing.mad = r.mad
-                    else:
-                        # Insert new
-                        anomaly = SatClockAnomaly(
+                    try:
+                        existing = SatClockAnomaly.query.filter_by(
                             sat_id=sat_id,
                             epoch=r.epoch,
-                            clock_bias=r.clock_bias,
-                            delta_clock=r.delta_clock,
-                            is_outlier=r.is_outlier,
-                            score=r.score,
-                            median=r.median,
-                            mad=r.mad,
                             detection_method='bias'
-                        )
-                        db.session.add(anomaly)
-                        total_bias += 1
+                        ).first()
+                        
+                        if existing:
+                            # Update existing
+                            existing.clock_bias = r.clock_bias
+                            existing.delta_clock = r.delta_clock
+                            existing.is_outlier = r.is_outlier
+                            existing.score = r.score
+                            existing.median = r.median
+                            existing.mad = r.mad
+                        else:
+                            # Insert new
+                            anomaly = SatClockAnomaly(
+                                sat_id=sat_id,
+                                epoch=r.epoch,
+                                clock_bias=r.clock_bias,
+                                delta_clock=r.delta_clock,
+                                is_outlier=r.is_outlier,
+                                score=r.score,
+                                median=r.median,
+                                mad=r.mad,
+                                detection_method='bias'
+                            )
+                            db.session.add(anomaly)
+                            total_bias += 1
+                    except Exception as e:
+                        # Log but continue with next record
+                        logger.warning(f"Failed to save bias result for {sat_id} at {r.epoch}: {e}")
+                        continue
                 
                 # Save delta method results
                 for r in results_delta:
-                    existing = SatClockAnomaly.query.filter_by(
-                        sat_id=sat_id,
-                        epoch=r.epoch,
-                        detection_method='delta'
-                    ).first()
-                    
-                    if existing:
-                        # Update existing
-                        existing.clock_bias = r.clock_bias
-                        existing.delta_clock = r.delta_clock
-                        existing.is_outlier = r.is_outlier
-                        existing.score = r.score
-                        existing.median = r.median
-                        existing.mad = r.mad
-                    else:
-                        # Insert new
-                        anomaly = SatClockAnomaly(
+                    try:
+                        existing = SatClockAnomaly.query.filter_by(
                             sat_id=sat_id,
                             epoch=r.epoch,
-                            clock_bias=r.clock_bias,
-                            delta_clock=r.delta_clock,
-                            is_outlier=r.is_outlier,
-                            score=r.score,
-                            median=r.median,
-                            mad=r.mad,
                             detection_method='delta'
-                        )
-                        db.session.add(anomaly)
-                        total_delta += 1
+                        ).first()
+                        
+                        if existing:
+                            # Update existing
+                            existing.clock_bias = r.clock_bias
+                            existing.delta_clock = r.delta_clock
+                            existing.is_outlier = r.is_outlier
+                            existing.score = r.score
+                            existing.median = r.median
+                            existing.mad = r.mad
+                        else:
+                            # Insert new
+                            anomaly = SatClockAnomaly(
+                                sat_id=sat_id,
+                                epoch=r.epoch,
+                                clock_bias=r.clock_bias,
+                                delta_clock=r.delta_clock,
+                                is_outlier=r.is_outlier,
+                                score=r.score,
+                                median=r.median,
+                                mad=r.mad,
+                                detection_method='delta'
+                            )
+                            db.session.add(anomaly)
+                            total_delta += 1
+                    except Exception as e:
+                        # Log but continue with next record
+                        logger.warning(f"Failed to save delta result for {sat_id} at {r.epoch}: {e}")
+                        continue
                 
                 total_processed += 1
             
