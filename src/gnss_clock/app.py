@@ -55,15 +55,18 @@ def create_app() -> Flask:
             pass   # колонка уже существует
         
         # Обновляем unique constraint - удаляем старый и создаём новый
+        # Try PostgreSQL first, then SQLite
         try:
-            # PostgreSQL: DROP INDEX IF EXISTS
+            # PostgreSQL: Drop old index
             db.session.execute(db.text("DROP INDEX IF EXISTS uix_anomaly_sat_epoch"))
             db.session.commit()
+            logger.info("Dropped old index uix_anomaly_sat_epoch")
         except Exception as e:
             # SQLite doesn't support DROP INDEX IF EXISTS without quotes
             try:
                 db.session.execute(db.text('DROP INDEX IF EXISTS "uix_anomaly_sat_epoch"'))
                 db.session.commit()
+                logger.info("Dropped old index uix_anomaly_sat_epoch (SQLite)")
             except Exception:
                 pass  # Индекс уже удалён или не существует
         
@@ -77,6 +80,7 @@ def create_app() -> Flask:
                 )
             )
             db.session.commit()
+            logger.info("Created new index uix_anomaly_sat_epoch_method")
         except Exception:
             try:
                 # SQLite syntax
@@ -87,6 +91,7 @@ def create_app() -> Flask:
                     )
                 )
                 db.session.commit()
+                logger.info("Created new index uix_anomaly_sat_epoch_method (SQLite)")
             except Exception:
                 pass  # Индекс уже существует
 
@@ -393,6 +398,8 @@ def _register_routes(app: Flask) -> None:
         """Recalculate anomalies for all satellites with both methods (bias & delta)"""
         if os.environ.get("GNSS_DISABLE_ADMIN_ETL", "").lower() == "true":
             return jsonify({"error": "Admin endpoint disabled"}), 403
+        
+        logger = logging.getLogger(__name__)
         
         try:
             from .models import SatClock, SatClockAnomaly, db
