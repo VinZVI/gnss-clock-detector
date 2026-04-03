@@ -48,14 +48,17 @@ def create_app() -> Flask:
     db.init_app(app)
     with app.app_context():
         db.create_all()
+        
         # Добавляем колонку detection_method если БД была создана раньше
         try:
             db.session.execute(
                 db.text("ALTER TABLE sat_clock_anomaly ADD COLUMN detection_method VARCHAR(10) DEFAULT 'bias'")
             )
             db.session.commit()
-        except Exception:
-            pass   # колонка уже существует
+            logger.info("Added detection_method column")
+        except Exception as e:
+            db.session.rollback()  # CRITICAL: Reset transaction state
+            logger.debug(f"detection_method column already exists: {e}")
         
         # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Удаляем старый unique constraint принудительно
         # Это нужно для Render.com где миграция могла не сработать
@@ -70,8 +73,8 @@ def create_app() -> Flask:
                 db.session.commit()
                 logger.info("✅ Old index dropped successfully")
         except Exception as e:
+            db.session.rollback()  # CRITICAL: Reset transaction state
             logger.warning(f"Could not check/drop old index: {e}")
-            db.session.rollback()
         
         # Обновляем unique constraint - удаляем старый и создаём новый
         # Try PostgreSQL first, then SQLite
@@ -81,12 +84,14 @@ def create_app() -> Flask:
             db.session.commit()
             logger.info("Dropped old index uix_anomaly_sat_epoch")
         except Exception as e:
+            db.session.rollback()  # CRITICAL: Reset transaction state
             # SQLite doesn't support DROP INDEX IF EXISTS without quotes
             try:
                 db.session.execute(db.text('DROP INDEX IF EXISTS "uix_anomaly_sat_epoch"'))
                 db.session.commit()
                 logger.info("Dropped old index uix_anomaly_sat_epoch (SQLite)")
             except Exception:
+                db.session.rollback()
                 pass  # Индекс уже удалён или не существует
         
         # Создаём новый unique constraint с detection_method
@@ -100,7 +105,8 @@ def create_app() -> Flask:
             )
             db.session.commit()
             logger.info("Created new index uix_anomaly_sat_epoch_method")
-        except Exception:
+        except Exception as e:
+            db.session.rollback()  # CRITICAL: Reset transaction state
             try:
                 # SQLite syntax
                 db.session.execute(
@@ -112,6 +118,7 @@ def create_app() -> Flask:
                 db.session.commit()
                 logger.info("Created new index uix_anomaly_sat_epoch_method (SQLite)")
             except Exception:
+                db.session.rollback()
                 pass  # Индекс уже существует
 
     _register_routes(app)
