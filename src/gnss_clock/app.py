@@ -18,6 +18,9 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+# Module-level logger for use during app initialization
+logger = logging.getLogger(__name__)
+
 _utcnow = lambda: datetime.now(timezone.utc).replace(tzinfo=None)
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -414,8 +417,6 @@ def _register_routes(app: Flask) -> None:
         """Recalculate anomalies for all satellites with both methods (bias & delta)"""
         if os.environ.get("GNSS_DISABLE_ADMIN_ETL", "").lower() == "true":
             return jsonify({"error": "Admin endpoint disabled"}), 403
-        
-        logger = logging.getLogger(__name__)
         
         try:
             from .models import SatClock, SatClockAnomaly, db
