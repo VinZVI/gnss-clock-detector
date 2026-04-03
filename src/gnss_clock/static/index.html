@@ -711,7 +711,7 @@ async function recalculateAllAnomalies() {
     return;
   }
   
-  setStatus('Пересчёт аномалий...', 'info');
+  setStatus('Запуск пересчёта аномалий...', 'info');
   
   try {
     const res = await fetch('/api/admin/recalculate-anomalies', {
@@ -725,19 +725,48 @@ async function recalculateAllAnomalies() {
       throw new Error(data.error || 'Recalculation failed');
     }
     
-    setStatus(
-      `Готово! Обработано ${data.satellites_processed || 0} КА, ` +
-      `метод bias: ${data.bias_count || 0} записей, ` +
-      `метод delta: ${data.delta_count || 0} записей`,
-      'ok'
-    );
+    setStatus('Пересчёт запущен в фоновом режиме...', 'info');
     
-    // Refresh satellite list
-    setTimeout(() => loadSatellites(), 1000);
+    // Start polling for status
+    startRecalcPolling();
     
   } catch(e) {
-    setStatus('Ошибка пересчёта: ' + e.message, 'error');
+    setStatus('Ошибка запуска пересчёта: ' + e.message, 'error');
   }
+}
+
+// Poll recalculation status
+let recalcPollInterval = null;
+function startRecalcPolling() {
+  if (recalcPollInterval) clearInterval(recalcPollInterval);
+  
+  recalcPollInterval = setInterval(async () => {
+    try {
+      const res = await fetch('/api/admin/recalculate-anomalies/status');
+      const status = await res.json();
+      
+      if (status.status === 'completed') {
+        clearInterval(recalcPollInterval);
+        const result = status.result || {};
+        setStatus(
+          `Готово! Обработано ${result.satellites_processed || 0} КА, ` +
+          `метод bias: ${result.bias_count || 0} записей, ` +
+          `метод delta: ${result.delta_count || 0} записей`,
+          'ok'
+        );
+        // Refresh satellite list
+        setTimeout(() => loadSatellites(), 1000);
+      } else if (status.status === 'failed') {
+        clearInterval(recalcPollInterval);
+        setStatus('Ошибка пересчёта: ' + (status.error || 'Unknown error'), 'error');
+      } else if (status.status === 'running' || status.status === 'starting') {
+        const progress = status.progress || 0;
+        setStatus(`Пересчёт в процессе... ${progress}%`, 'info');
+      }
+    } catch(e) {
+      console.error('Failed to poll recalculation status:', e);
+    }
+  }, 1000);  // Poll every second
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
