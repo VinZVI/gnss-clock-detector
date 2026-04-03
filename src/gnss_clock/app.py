@@ -439,153 +439,155 @@ def _register_routes(app: Flask) -> None:
         _recalc_running['result'] = None
         
         def run_recalc_background():
-            _recalc_running['status'] = 'running'
-            try:
-                from .models import SatClock, SatClockAnomaly, db
-                from .detector import detect_outliers
-                from datetime import datetime, timezone
-                
-                # Get all unique satellite IDs
-                sat_ids = [r[0] for r in db.session.query(SatClock.sat_id).distinct().all()]
-                total_sats = len(sat_ids)
-                
-                total_processed = 0
-                total_bias = 0
-                total_delta = 0
-                
-                for idx, sat_id in enumerate(sat_ids):
-                    # Update progress
-                    _recalc_running['progress'] = int((idx / total_sats) * 100) if total_sats > 0 else 0
-                    
-                    # Get all clock data for this satellite
-                    clocks = (
-                        SatClock.query
-                        .filter(SatClock.sat_id == sat_id)
-                        .order_by(SatClock.epoch)
-                        .all()
-                    )
-                    
-                    if not clocks:
-                        continue
-                    
-                    # Prepare timeseries for detection
-                    timeseries = [
-                        {"epoch": c.epoch, "clock_bias": c.clock_bias}
-                        for c in clocks
-                    ]
-                    
-                    # Detect with bias method
-                    results_bias = detect_outliers(timeseries, threshold=3.0, method='bias')
-                    
-                    # Detect with delta method
-                    results_delta = detect_outliers(timeseries, threshold=3.0, method='delta')
-                    
-                    # Save bias method results
-                    for r in results_bias:
-                        try:
-                            existing = SatClockAnomaly.query.filter_by(
-                                sat_id=sat_id,
-                                epoch=r.epoch,
-                                detection_method='bias'
-                            ).first()
-                            
-                            if existing:
-                                # Update existing
-                                existing.clock_bias = r.clock_bias
-                                existing.delta_clock = r.delta_clock
-                                existing.is_outlier = r.is_outlier
-                                existing.score = r.score
-                                existing.median = r.median
-                                existing.mad = r.mad
-                            else:
-                                # Insert new
-                                anomaly = SatClockAnomaly(
-                                    sat_id=sat_id,
-                                    epoch=r.epoch,
-                                    clock_bias=r.clock_bias,
-                                    delta_clock=r.delta_clock,
-                                    is_outlier=r.is_outlier,
-                                    score=r.score,
-                                    median=r.median,
-                                    mad=r.mad,
-                                    detection_method='bias'
-                                )
-                                db.session.add(anomaly)
-                                total_bias += 1
-                        except Exception as e:
-                            logger.warning(f"Failed to save bias result for {sat_id} at {r.epoch}: {e}")
-                            db.session.rollback()
-                            continue
-                    
-                    # Save delta method results
-                    for r in results_delta:
-                        try:
-                            existing = SatClockAnomaly.query.filter_by(
-                                sat_id=sat_id,
-                                epoch=r.epoch,
-                                detection_method='delta'
-                            ).first()
-                            
-                            if existing:
-                                # Update existing
-                                existing.clock_bias = r.clock_bias
-                                existing.delta_clock = r.delta_clock
-                                existing.is_outlier = r.is_outlier
-                                existing.score = r.score
-                                existing.median = r.median
-                                existing.mad = r.mad
-                            else:
-                                # Insert new
-                                anomaly = SatClockAnomaly(
-                                    sat_id=sat_id,
-                                    epoch=r.epoch,
-                                    clock_bias=r.clock_bias,
-                                    delta_clock=r.delta_clock,
-                                    is_outlier=r.is_outlier,
-                                    score=r.score,
-                                    median=r.median,
-                                    mad=r.mad,
-                                    detection_method='delta'
-                                )
-                                db.session.add(anomaly)
-                                total_delta += 1
-                        except Exception as e:
-                            logger.warning(f"Failed to save delta result for {sat_id} at {r.epoch}: {e}")
-                            db.session.rollback()
-                            continue
-                    
-                    total_processed += 1
-                    
-                    # Commit every 5 satellites to avoid huge transactions
-                    if total_processed % 5 == 0:
-                        try:
-                            db.session.commit()
-                        except Exception as e:
-                            logger.error(f"Commit failed at satellite {sat_id}: {e}")
-                            db.session.rollback()
-                
-                # Final commit
+            # Create application context for background thread
+            with app.app_context():
+                _recalc_running['status'] = 'running'
                 try:
-                    db.session.commit()
+                    from .models import SatClock, SatClockAnomaly, db
+                    from .detector import detect_outliers
+                    from datetime import datetime, timezone
+                    
+                    # Get all unique satellite IDs
+                    sat_ids = [r[0] for r in db.session.query(SatClock.sat_id).distinct().all()]
+                    total_sats = len(sat_ids)
+                    
+                    total_processed = 0
+                    total_bias = 0
+                    total_delta = 0
+                    
+                    for idx, sat_id in enumerate(sat_ids):
+                        # Update progress
+                        _recalc_running['progress'] = int((idx / total_sats) * 100) if total_sats > 0 else 0
+                        
+                        # Get all clock data for this satellite
+                        clocks = (
+                            SatClock.query
+                            .filter(SatClock.sat_id == sat_id)
+                            .order_by(SatClock.epoch)
+                            .all()
+                        )
+                        
+                        if not clocks:
+                            continue
+                        
+                        # Prepare timeseries for detection
+                        timeseries = [
+                            {"epoch": c.epoch, "clock_bias": c.clock_bias}
+                            for c in clocks
+                        ]
+                        
+                        # Detect with bias method
+                        results_bias = detect_outliers(timeseries, threshold=3.0, method='bias')
+                        
+                        # Detect with delta method
+                        results_delta = detect_outliers(timeseries, threshold=3.0, method='delta')
+                        
+                        # Save bias method results
+                        for r in results_bias:
+                            try:
+                                existing = SatClockAnomaly.query.filter_by(
+                                    sat_id=sat_id,
+                                    epoch=r.epoch,
+                                    detection_method='bias'
+                                ).first()
+                                
+                                if existing:
+                                    # Update existing
+                                    existing.clock_bias = r.clock_bias
+                                    existing.delta_clock = r.delta_clock
+                                    existing.is_outlier = r.is_outlier
+                                    existing.score = r.score
+                                    existing.median = r.median
+                                    existing.mad = r.mad
+                                else:
+                                    # Insert new
+                                    anomaly = SatClockAnomaly(
+                                        sat_id=sat_id,
+                                        epoch=r.epoch,
+                                        clock_bias=r.clock_bias,
+                                        delta_clock=r.delta_clock,
+                                        is_outlier=r.is_outlier,
+                                        score=r.score,
+                                        median=r.median,
+                                        mad=r.mad,
+                                        detection_method='bias'
+                                    )
+                                    db.session.add(anomaly)
+                                    total_bias += 1
+                            except Exception as e:
+                                logger.warning(f"Failed to save bias result for {sat_id} at {r.epoch}: {e}")
+                                db.session.rollback()
+                                continue
+                        
+                        # Save delta method results
+                        for r in results_delta:
+                            try:
+                                existing = SatClockAnomaly.query.filter_by(
+                                    sat_id=sat_id,
+                                    epoch=r.epoch,
+                                    detection_method='delta'
+                                ).first()
+                                
+                                if existing:
+                                    # Update existing
+                                    existing.clock_bias = r.clock_bias
+                                    existing.delta_clock = r.delta_clock
+                                    existing.is_outlier = r.is_outlier
+                                    existing.score = r.score
+                                    existing.median = r.median
+                                    existing.mad = r.mad
+                                else:
+                                    # Insert new
+                                    anomaly = SatClockAnomaly(
+                                        sat_id=sat_id,
+                                        epoch=r.epoch,
+                                        clock_bias=r.clock_bias,
+                                        delta_clock=r.delta_clock,
+                                        is_outlier=r.is_outlier,
+                                        score=r.score,
+                                        median=r.median,
+                                        mad=r.mad,
+                                        detection_method='delta'
+                                    )
+                                    db.session.add(anomaly)
+                                    total_delta += 1
+                            except Exception as e:
+                                logger.warning(f"Failed to save delta result for {sat_id} at {r.epoch}: {e}")
+                                db.session.rollback()
+                                continue
+                        
+                        total_processed += 1
+                        
+                        # Commit every 5 satellites to avoid huge transactions
+                        if total_processed % 5 == 0:
+                            try:
+                                db.session.commit()
+                            except Exception as e:
+                                logger.error(f"Commit failed at satellite {sat_id}: {e}")
+                                db.session.rollback()
+                    
+                    # Final commit
+                    try:
+                        db.session.commit()
+                    except Exception as e:
+                        logger.error(f"Final commit failed: {e}")
+                        db.session.rollback()
+                        raise
+                    
+                    _recalc_running['status'] = 'completed'
+                    _recalc_running['progress'] = 100
+                    _recalc_running['result'] = {
+                        "satellites_processed": total_processed,
+                        "bias_count": total_bias,
+                        "delta_count": total_delta
+                    }
+                    
                 except Exception as e:
-                    logger.error(f"Final commit failed: {e}")
+                    _recalc_running['status'] = 'failed'
+                    _recalc_running['error'] = str(e)
+                    _recalc_running['details'] = repr(e)
+                    logger.error(f"Background recalculation failed: {e}", exc_info=True)
                     db.session.rollback()
-                    raise
-                
-                _recalc_running['status'] = 'completed'
-                _recalc_running['progress'] = 100
-                _recalc_running['result'] = {
-                    "satellites_processed": total_processed,
-                    "bias_count": total_bias,
-                    "delta_count": total_delta
-                }
-                
-            except Exception as e:
-                _recalc_running['status'] = 'failed'
-                _recalc_running['error'] = str(e)
-                _recalc_running['details'] = repr(e)
-                logger.error(f"Background recalculation failed: {e}", exc_info=True)
-                db.session.rollback()
         
         # Start background thread
         thread = threading.Thread(target=run_recalc_background, daemon=True)
