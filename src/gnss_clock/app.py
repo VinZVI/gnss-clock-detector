@@ -63,29 +63,30 @@ def create_app() -> Flask:
         # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Удаляем старый unique constraint принудительно
         # Это нужно для Render.com где миграция могла не сработать
         try:
-            # Проверяем существование старого индекса
+            # Проверяем существование старого индекса/констрейнта
             result = db.session.execute(
                 db.text("SELECT 1 FROM pg_indexes WHERE indexname = 'uix_anomaly_sat_epoch'")
             ).first()
             if result:
-                logger.info("Found old index uix_anomaly_sat_epoch - dropping it")
-                db.session.execute(db.text("DROP INDEX uix_anomaly_sat_epoch"))
+                logger.info("Found old constraint uix_anomaly_sat_epoch - dropping it")
+                # Сначала удаляем констрейнт (не индекс)
+                db.session.execute(db.text("ALTER TABLE sat_clock_anomaly DROP CONSTRAINT IF EXISTS uix_anomaly_sat_epoch"))
                 db.session.commit()
-                logger.info("✅ Old index dropped successfully")
+                logger.info("✅ Old constraint dropped successfully")
         except Exception as e:
             db.session.rollback()  # CRITICAL: Reset transaction state
-            logger.warning(f"Could not check/drop old index: {e}")
+            logger.warning(f"Could not check/drop old constraint: {e}")
         
         # Обновляем unique constraint - удаляем старый и создаём новый
         # Try PostgreSQL first, then SQLite
         try:
-            # PostgreSQL: Drop old index (double-check)
-            db.session.execute(db.text("DROP INDEX IF EXISTS uix_anomaly_sat_epoch"))
+            # PostgreSQL: Drop old constraint (double-check)
+            db.session.execute(db.text("ALTER TABLE sat_clock_anomaly DROP CONSTRAINT IF EXISTS uix_anomaly_sat_epoch"))
             db.session.commit()
-            logger.info("Dropped old index uix_anomaly_sat_epoch")
+            logger.info("Dropped old constraint uix_anomaly_sat_epoch")
         except Exception as e:
             db.session.rollback()  # CRITICAL: Reset transaction state
-            # SQLite doesn't support DROP INDEX IF EXISTS without quotes
+            # SQLite doesn't support DROP CONSTRAINT IF EXISTS
             try:
                 db.session.execute(db.text('DROP INDEX IF EXISTS "uix_anomaly_sat_epoch"'))
                 db.session.commit()
