@@ -103,23 +103,25 @@ def _process_anomalies(app, since: datetime) -> int:
                 continue
 
             ts = [{"epoch": r.epoch, "clock_bias": r.clock_bias} for r in raw]
-            results = detect_outliers(ts, threshold=config.MAD_THRESHOLD)
+            results = detect_outliers(ts, threshold=config.MAD_THRESHOLD, method='bias')  # ETL uses bias method by default
 
             SatClockAnomaly.query.filter(
                 SatClockAnomaly.sat_id == sat_id,
                 SatClockAnomaly.epoch  >= since,
+                SatClockAnomaly.detection_method == 'bias',  # Only delete bias method records
             ).delete(synchronize_session=False)
 
             for r in results:
                 db.session.add(SatClockAnomaly(
-                    sat_id      = sat_id,
-                    epoch       = r.epoch,
-                    clock_bias  = r.clock_bias,
-                    delta_clock = r.delta_clock,
-                    is_outlier  = r.is_outlier,
-                    score       = r.score,
-                    median      = r.median,
-                    mad         = r.mad,
+                    sat_id           = sat_id,
+                    epoch            = r.epoch,
+                    clock_bias       = r.clock_bias,
+                    delta_clock      = r.delta_clock,
+                    is_outlier       = r.is_outlier,
+                    score            = r.score,
+                    median           = r.median,
+                    mad              = r.mad,
+                    detection_method = 'bias',  # Explicitly set method
                 ))
 
             db.session.commit()
