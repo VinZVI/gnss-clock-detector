@@ -37,6 +37,7 @@
     .btn:hover { opacity: .82; }
     .btn-primary { background: #238636; color: #fff; }
     .btn-secondary { background: #1f6feb; color: #fff; }
+    .btn-warn { background: #9e6a03; color: #fff; }
     .btn-ghost { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
     .btn-ghost:hover { color: #e6edf3; border-color: #58a6ff; }
     .btn-sm { padding: 5px 12px; font-size: .78rem; }
@@ -62,6 +63,7 @@
     tr:hover td { background: #1c2128; }
 
     .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: .7rem; font-weight: 600; }
+    .ok { background: #1a3a2a; color: #56d364; }
     .anomaly { background: #3d1c1c; color: #f85149; }
 
     #status { padding: 9px 13px; border-radius: 7px; margin-bottom: 16px; font-size: .83rem; display: none; }
@@ -83,7 +85,7 @@
   <div style="font-size:1.4rem">🛰️</div>
   <div>
     <h1>GNSS Clock Anomaly Detector</h1>
-    <p>Rolling Window MAD-based outlier detection</p>
+    <p>Rolling Window MAD-based outlier detection from GLONASS-IAC FTP</p>
   </div>
 </header>
 
@@ -164,6 +166,23 @@
     </div>
   </div>
 
+  <!-- ── Лог ETL ────────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Последние запуски ETL с FTP</h2>
+      <div>
+        <button class="btn btn-secondary btn-sm" onclick="triggerEtl()">▶ Запустить ETL</button>
+        <button class="btn btn-warn btn-sm" onclick="loadEtlStatus()">Обновить лог</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Время</th><th>Файл</th><th>Raw</th><th>New</th><th>Статус</th></tr></thead>
+        <tbody id="etlTable"><tr><td colspan="5" class="empty">Загрузка…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -172,6 +191,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 let chart       = null;
 let _activeSat  = null;
+let etlPollingInterval = null;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Инициализация
@@ -184,6 +204,7 @@ let _activeSat  = null;
   document.getElementById('dateTo').value   = fmt(now);
 
   loadSatellites();
+  loadEtlStatus();
   
   const updateOnInput = () => { if (_activeSat) loadData(); };
   document.getElementById('madThreshold').addEventListener('input', updateOnInput);
@@ -355,13 +376,11 @@ async function loadData() {
       throw new Error(data.error || 'Ошибка API');
     }
 
-    // Обновляем стат-карточки
     document.getElementById('statSat').textContent   = _activeSat;
     document.getElementById('statTotal').textContent = data.count;
     document.getElementById('statAnom').textContent  = data.anomalies;
     document.getElementById('statRate').textContent  = data.count > 0 ? (data.anomalies / data.count * 100).toFixed(1) + '%' : '0%';
 
-    // Строим график и таблицу
     renderChart(data.timeseries);
     renderAnomalyTable(data.timeseries);
 
@@ -374,6 +393,77 @@ async function loadData() {
     }
     document.getElementById('anomalyTable').innerHTML = `<tr><td colspan="5" class="empty">${e.message}</td></tr>`;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ETL
+// ─────────────────────────────────────────────────────────────────────────────
+async function loadEtlStatus() {
+  try {
+    const res  = await fetch('/api/etl/status');
+    const data = await res.json();
+    const tbody = document.getElementById('etlTable');
+    if (!data.runs?.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">ETL ещё не запускался</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.runs.map(r => {
+      const t      = r.started_at ? r.started_at.replace('T',' ').slice(0,19) : '—';
+      const cls    = r.status === 'ok' ? 'ok' : 'anomaly';
+      return `<tr>
+        <td>${t}</td>
+        <td style="font-family:monospace;font-size:.78rem">${r.ftp_file || '—'}</td>
+        <td>${r.records_raw  ?? 0}</td>
+        <td>${r.records_new  ?? 0}</td>
+        <td><span class="badge ${cls}">${r.status}</span></td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    console.error("ETL status error:", e);
+    document.getElementById('etlTable').innerHTML = '<tr><td colspan="5" class="empty">Ошибка загрузки лога</td></tr>';
+  }
+}
+
+async function triggerEtl() {
+  if (!confirm(`Запустить ETL для загрузки свежих данных с FTP?`)) return;
+  
+  setStatus('Запуск ETL...', 'info');
+  try {
+    const res = await fetch('/api/admin/etl', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'ETL failed');
+    
+    setStatus('ETL запущен... Ожидание завершения', 'info');
+    startEtlPolling();
+  } catch(e) {
+    setStatus('Ошибка запуска ETL: ' + e.message, 'error');
+  }
+}
+
+function startEtlPolling() {
+  clearInterval(etlPollingInterval);
+  etlPollingInterval = setInterval(async () => {
+    try {
+      const res = await fetch('/api/admin/etl/status');
+      const data = await res.json();
+      
+      if (data.status === 'completed') {
+        clearInterval(etlPollingInterval);
+        const result = data.result || {};
+        setStatus(`ETL завершён: обработано ${result.files_processed || 0} файлов, ${result.records_new || 0} новых записей.`, 'ok');
+        setTimeout(() => {
+          loadEtlStatus();
+          loadSatellites();
+        }, 500);
+      } else if (data.status === 'failed') {
+        clearInterval(etlPollingInterval);
+        setStatus(`Ошибка ETL: ${data.error}`, 'error');
+      }
+    } catch(e) {
+      console.error('Polling error:', e);
+      clearInterval(etlPollingInterval);
+    }
+  }, 2000);
 }
 </script>
 </body>

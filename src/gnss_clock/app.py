@@ -5,7 +5,6 @@ Endpoints:
     GET  /                                         → index.html
     GET  /api/satellites                           → список спутников
     GET  /api/clock-series?sat_id=R01&from=&to=&threshold=3.0&window_size=15 → ряд + аномалии
-    GET  /api/stats/daily?date=YYYY-MM-DD          → суточная сводка
     GET  /api/etl/status                           → последние 20 запусков ETL
     POST /api/admin/etl                            → запустить ETL вручную (dev)
 """
@@ -16,7 +15,6 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-# Module-level logger for use during app initialization
 logger = logging.getLogger(__name__)
 
 _utcnow = lambda: datetime.now(timezone.utc).replace(tzinfo=None)
@@ -25,7 +23,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from sqlalchemy import func
 
 from . import config
-from .models import db, SatClock, SatClockAnomaly, EtlLog
+from .models import db, SatClock, EtlLog
 from .detector import detect_outliers
 
 
@@ -47,8 +45,6 @@ def create_app() -> Flask:
     db.init_app(app)
     with app.app_context():
         db.create_all()
-        # Старые миграции и проверки можно будет убрать в будущем,
-        # но пока оставим для обратной совместимости.
 
     _register_routes(app)
     return app
@@ -81,12 +77,8 @@ def _register_routes(app: Flask) -> None:
     def index():
         return send_from_directory(app.static_folder, "index.html")
 
-    # ── Satellites ────────────────────────────────────────────────────────
-
     @app.route("/api/satellites")
     def get_satellites():
-        # Теперь аномалии считаются на лету, так что эта статистика становится менее релевантной.
-        # Оставим ее для общего обзора данных.
         rows = (
             db.session.query(
                 SatClock.sat_id,
@@ -101,14 +93,11 @@ def _register_routes(app: Flask) -> None:
                 {
                     "sat_id":     r.sat_id,
                     "count":      r.count,
-                    "anomalies":  0, # Это поле больше не используется напрямую
                     "last_epoch": r.last_epoch.isoformat() if r.last_epoch else None,
                 }
                 for r in sorted(rows, key=lambda x: x.sat_id)
             ]
         })
-
-    # ── Clock series (On-the-fly anomaly detection) ──────────────────────
 
     @app.route("/api/clock-series")
     def clock_series():
@@ -122,7 +111,6 @@ def _register_routes(app: Flask) -> None:
         if from_dt is None:
             return jsonify({"error": "from/to required (YYYY-MM-DD)"}), 400
 
-        # 1. Получаем сырые данные из основной таблицы
         records = (
             SatClock.query
             .filter(
@@ -137,20 +125,17 @@ def _register_routes(app: Flask) -> None:
         if not records:
             return jsonify({"error": f"No data for {sat_id} in the selected range"}), 404
 
-        # 2. Готовим данные для детектора
         timeseries_raw = [
             {"epoch": r.epoch, "clock_bias": r.clock_bias}
             for r in records
         ]
 
-        # 3. Вызываем детектор с параметрами из запроса
         results = detect_outliers(
             timeseries_raw,
             threshold=threshold,
             window_size=window_size
         )
 
-        # 4. Формируем ответ
         return jsonify({
             "sat_id":     sat_id,
             "count":      len(results),
@@ -164,48 +149,12 @@ def _register_routes(app: Flask) -> None:
                     "delta_clock": r.delta_clock,
                     "is_outlier":  r.is_outlier,
                     "score":       r.score,
-                    "median":      r.median, # Локальная медиана
-                    "mad":         r.mad,      # Локальный MAD
+                    "median":      r.median,
+                    "mad":         r.mad,
                 }
                 for r in results
             ],
         })
-
-    # ── Daily stats ───────────────────────────────────────────────────────
-    # Этот эндпоинт может потребовать пересмотра, т.к. он зависит от SatClockAnomaly,
-    # которую мы больше не используем для основного UI. Пока оставим как есть.
-    @app.route("/api/stats/daily")
-    def stats_daily():
-        date_str = request.args.get("date", _utcnow().strftime("%Y-%m-%d"))
-        try:
-            target = datetime.strptime(date_str, "%Y-%m-%d")
-        except ValueError:
-            return jsonify({"error": "invalid date"}), 400
-
-        next_d = target + timedelta(days=1)
-        rows = (
-            db.session.query(
-                SatClock.sat_id,
-                func.count(SatClock.id).label("total"),
-            )
-            .filter(SatClock.epoch >= target, SatClock.epoch < next_d)
-            .group_by(SatClock.sat_id)
-            .all()
-        )
-        return jsonify({
-            "date": date_str,
-            "stats": [
-                {
-                    "sat_id":       r.sat_id,
-                    "total":        r.total,
-                    "anomalies":    0, # Placeholder
-                    "anomaly_rate": 0, # Placeholder
-                }
-                for r in sorted(rows, key=lambda x: x.sat_id)
-            ],
-        })
-
-    # ── ETL status ────────────────────────────────────────────────────────
 
     @app.route("/api/etl/status")
     def etl_status():
@@ -217,7 +166,6 @@ def _register_routes(app: Flask) -> None:
                     "started_at":   l.started_at.isoformat()  if l.started_at  else None,
                     "finished_at":  l.finished_at.isoformat() if l.finished_at else None,
                     "ftp_file":     l.ftp_file,
-                    "data_source":  getattr(l, "data_source", "ftp"),
                     "records_raw":  l.records_raw,
                     "records_new":  l.records_new,
                     "status":       l.status,
@@ -233,12 +181,6 @@ def _register_routes(app: Flask) -> None:
 
     @app.route("/api/admin/etl", methods=["POST"])
     def trigger_etl():
-        if os.environ.get("GNSS_DISABLE_ADMIN_ETL", "").lower() == "true":
-            return jsonify({"error": "Admin ETL endpoint disabled"}), 403
-
-        body = request.get_json(silent=True) or {}
-        days = int(body.get("days", 3))
-
         if _etl_running.get('status') == 'running':
             return jsonify({"error": "ETL already running"}), 409
 
@@ -247,7 +189,7 @@ def _register_routes(app: Flask) -> None:
             _etl_running['error'] = None
             try:
                 from .etl import run_etl
-                stats = run_etl(days_back=days)
+                stats = run_etl()
                 _etl_running['status'] = 'completed'
                 _etl_running['result'] = stats
             except Exception as e:

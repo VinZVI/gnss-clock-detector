@@ -1,5 +1,5 @@
 """
-ETL pipeline: FTP / NASA CDDIS → parse → SQLite.
+ETL pipeline: FTP → parse → SQLite.
 
 Запуск:
     python -m gnss_clock.etl --days 7
@@ -12,10 +12,9 @@ from datetime import datetime, timedelta, timezone
 
 _utcnow = lambda: datetime.now(timezone.utc).replace(tzinfo=None)
 
-import numpy as np
-
 from . import config
 from .parsers import parse_file
+from .ftp_client import iter_new_files as ftp_iter
 
 logger = logging.getLogger(__name__)
 
@@ -50,15 +49,12 @@ def _load_clocks(app, records: list[dict]) -> int:
         return 0
 
     with app.app_context():
-        # Используем bulk_insert_mappings для эффективности
-        # и обрабатываем конфликты на уровне БД (ON CONFLICT DO NOTHING)
         try:
             db.session.bulk_insert_mappings(SatClock, records)
             db.session.commit()
             return len(records)
         except Exception:
             db.session.rollback()
-            # Fallback для баз, не поддерживающих bulk insert с конфликтами
             inserted = 0
             for record in records:
                 try:
@@ -75,10 +71,7 @@ def _purge_old_data(app) -> None:
 
     cutoff = _utcnow() - timedelta(days=config.ETL_RETAIN_DAYS)
     with app.app_context():
-        # Удаляем только сырые данные. Таблица аномалий больше не используется.
         n1 = SatClock.query.filter(SatClock.epoch < cutoff).delete()
-        
-        # Очищаем старые логи ETL
         old_logs = (
             EtlLog.query.order_by(EtlLog.started_at.desc()).offset(200).all()
         )
@@ -91,47 +84,16 @@ def _purge_old_data(app) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Итератор файлов с учётом источника данных
-# ---------------------------------------------------------------------------
-
-def _iter_files(source: str, days_back: int, already_loaded: set[str]):
-    from .ftp_client  import iter_new_files as ftp_iter
-    from .nasa_client import iter_new_files as nasa_iter
-
-    def _labeled(it, label):
-        for fname, text in it:
-            yield fname, text, label
-
-    if source == "ftp":
-        yield from _labeled(ftp_iter(days_back, already_loaded), "ftp")
-    elif source == "nasa":
-        yield from _labeled(nasa_iter(days_back, already_loaded), "nasa")
-    elif source == "auto":
-        ftp_count = 0
-        for item in _labeled(ftp_iter(days_back, already_loaded), "ftp"):
-            ftp_count += 1
-            yield item
-        if ftp_count == 0:
-            logger.info("FTP: нет новых файлов — пробуем NASA CDDIS")
-            yield from _labeled(nasa_iter(days_back, already_loaded), "nasa")
-    else:
-        logger.error("Неизвестный источник данных: %s", source)
-
-
-# ---------------------------------------------------------------------------
 # Главный pipeline
 # ---------------------------------------------------------------------------
 
-def run_etl(
-    days_back: int = config.ETL_DAYS_BACK,
-    source: str = config.DATA_SOURCE,
-) -> dict:
+def run_etl(days_back: int = config.ETL_DAYS_BACK) -> dict:
     from .models import db, EtlLog
 
     app = _get_app()
     stats = {
         "started_at":      _utcnow().isoformat(),
-        "source":          source,
+        "source":          "ftp",
         "files_processed": 0,
         "records_raw":     0,
         "records_new":     0,
@@ -140,16 +102,16 @@ def run_etl(
 
     loaded_files = _already_loaded_files(app)
 
-    for fname, text, src_label in _iter_files(source, days_back, loaded_files):
+    for fname, text in ftp_iter(days_back, loaded_files):
         records = parse_file(text, fname)
         stats["files_processed"] += 1
         stats["records_raw"]     += len(records)
 
         for r in records:
-            r["source"] = src_label
+            r["source"] = "ftp"
 
         with app.app_context():
-            log = EtlLog(ftp_file=fname, data_source=src_label, records_raw=len(records))
+            log = EtlLog(ftp_file=fname, data_source="ftp", records_raw=len(records))
             db.session.add(log)
             db.session.commit()
             try:
@@ -167,15 +129,13 @@ def run_etl(
                 db.session.commit()
 
     if stats["files_processed"] == 0:
-        logger.warning("Источник '%s': 0 новых файлов", source)
+        logger.warning("Источник 'ftp': 0 новых файлов")
 
-    # Очистка старых данных
     _purge_old_data(app)
 
     stats["finished_at"] = _utcnow().isoformat()
     logger.info(
-        "ETL завершён [%s]: файлов=%d, raw=%d, new=%d, ошибок=%d",
-        stats["source"],
+        "ETL завершён [ftp]: файлов=%d, raw=%d, new=%d, ошибок=%d",
         stats["files_processed"], stats["records_raw"],
         stats["records_new"], len(stats["errors"]),
     )
@@ -193,17 +153,11 @@ def main():
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    p = argparse.ArgumentParser(description="GNSS Clock ETL")
-    p.add_argument("--source", default=config.DATA_SOURCE,
-                   choices=["ftp", "nasa", "auto"],
-                   help="Источник данных")
+    p = argparse.ArgumentParser(description="GNSS Clock ETL from FTP")
     p.add_argument("--days", type=int, default=config.ETL_DAYS_BACK)
     args = p.parse_args()
 
-    stats = run_etl(
-        days_back=args.days,
-        source=args.source,
-    )
+    stats = run_etl(days_back=args.days)
     if stats["errors"]:
         sys.exit(1)
 
