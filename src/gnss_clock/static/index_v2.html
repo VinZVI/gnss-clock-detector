@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GNSS Clock Analytics</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
+
+  <style>
+    :root {
+      --bg-color: #0d1117; --card-bg: #161b22; --border-color: #30363d;
+      --text-primary: #e6edf3; --text-secondary: #8b949e; --text-tertiary: #484f58;
+      --accent-blue: #58a6ff; --accent-green: #3fb950; --accent-yellow: #d29922; --accent-red: #f85149;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-color); color: var(--text-primary); }
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+    header { background: linear-gradient(135deg, #1a2332, #0d2137); border-bottom: 1px solid var(--border-color); padding: 16px 32px; }
+    header h1 { font-size: 1.2rem; font-weight: 600; color: var(--accent-blue); }
+    header p { font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; }
+
+    .card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 10px; margin-bottom: 20px; }
+    .card-header { padding: 14px 18px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; }
+    .card-header h2 { font-size: 0.9rem; color: var(--text-secondary); }
+    .card-body { padding: 18px; }
+
+    .controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label { font-size: .75rem; color: var(--text-secondary); text-transform: uppercase; }
+    .field select, .field input {
+      background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 6px;
+      color: var(--text-primary); padding: 8px 12px; font-size: .9rem; outline: none;
+    }
+    .field input[type=number] { width: 90px; }
+
+    .btn { padding: 8px 18px; border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer; font-size: .9rem; background: var(--card-bg); color: var(--text-primary); }
+    .btn:hover { border-color: var(--accent-blue); }
+    .btn-primary { background: var(--accent-green); border-color: var(--accent-green); color: #fff; }
+    .btn-sm { padding: 5px 12px; font-size: .8rem; }
+    
+    #status { padding: 9px 13px; border-radius: 7px; margin: 0 0 16px; font-size: .85rem; display: none; }
+    #status.info { background: #132030; color: var(--accent-blue); display: block; }
+    #status.error { background: #2d1117; color: var(--accent-red); display: block; }
+    #status.ok { background: #0d2a17; color: var(--accent-green); display: block; }
+
+    .sat-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip { padding: 4px 12px; border-radius: 14px; background: var(--border-color); color: var(--text-secondary); font-size: .85rem; cursor: pointer; border: 1px solid transparent; }
+    .chip:hover { border-color: var(--accent-blue); }
+    .chip.active { background: var(--accent-blue); color: #fff; font-weight: 600; }
+
+    .analytics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+    .stat-card { background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; text-align: center; }
+    .stat-label { color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 8px; text-transform: uppercase; display: block; }
+    .stat-value { color: var(--text-primary); font-size: 1.6rem; font-weight: 600; }
+    .stat-unit { color: var(--text-tertiary); font-size: 0.75rem; margin-left: 4px; }
+    .health-good { color: var(--accent-green); }
+    .health-warning { color: var(--accent-yellow); }
+    .health-bad { color: var(--accent-red); }
+
+    .chart-wrap { position: relative; height: 350px; }
+    .empty { text-align: center; color: var(--text-tertiary); padding: 40px; }
+    
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+    th { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border-color); font-size: .75rem; text-transform: uppercase; color: var(--text-secondary); }
+    td { padding: 8px 12px; border-bottom: 1px solid var(--card-bg); }
+    .badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: .75rem; font-weight: 600; }
+    .ok { background: #1a3a2a; color: var(--accent-green); }
+    .error { background: #3d1c1c; color: var(--accent-red); }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <div>
+      <h1>GNSS Clock Monitoring & Analytics</h1>
+      <p>Real-time anomaly detection and stability analysis from GLONASS-IAC FTP</p>
+    </div>
+  </header>
+
+  <div class="card" style="margin-top: 24px;">
+    <div class="card-body controls">
+      <div class="field"><label for="productType">Тип данных</label><select id="productType"><option value="final">Final</option><option value="rapid" selected>Rapid</option><option value="ultra">Ultra-Rapid</option></select></div>
+      <div class="field"><label for="dateFrom">От</label><input type="date" id="dateFrom" /></div>
+      <div class="field"><label for="dateTo">До</label><input type="date" id="dateTo" /></div>
+      <div class="field"><label for="madThreshold">Порог (k)</label><input type="number" id="madThreshold" value="3.5" step="0.5" min="1" /></div>
+      <div class="field"><label for="windowSize">Окно</label><input type="number" id="windowSize" value="15" min="3" step="2" /></div>
+      <button class="btn-primary" onclick="loadData()">Обновить</button>
+    </div>
+  </div>
+
+  <div class="card"><div class="card-body sat-chips" id="satChips"><div class="empty">Загрузка спутников…</div></div></div>
+  
+  <div id="status"></div>
+
+  <div class="card" id="analyticsCard" style="display: none;">
+    <div class="card-header"><h2>Аналитика стабильности</h2></div>
+    <div class="card-body analytics-grid" id="analyticsGrid">
+      <div class="stat-card"><span class="stat-label">Средний дрейф</span><div><span class="stat-value" id="valDrift">--</span><span class="stat-unit">нс/с</span></div></div>
+      <div class="stat-card"><span class="stat-label">Макс. скачок</span><div><span class="stat-value" id="valJump">--</span><span class="stat-unit">нс</span></div></div>
+      <div class="stat-card"><span class="stat-label">Индекс здоровья</span><div><span class="stat-value" id="valHealth">--</span><span class="stat-unit">%</span></div></div>
+      <div class="stat-card"><span class="stat-label">Шум (RMS)</span><div><span class="stat-value" id="valRMS">--</span><span class="stat-unit">нс</span></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h2>Временной ряд</h2><button class="btn btn-sm" onclick="resetZoom()">Сброс</button></div>
+    <div class="card-body chart-wrap"><canvas id="chart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h2>Последние запуски ETL</h2>
+      <div>
+        <button class="btn btn-sm" onclick="triggerEtl()">▶ Запустить ETL</button>
+        <button class="btn btn-sm" onclick="loadEtlStatus()">Обновить лог</button>
+      </div>
+    </div>
+    <div class="card-body table-wrap">
+      <table>
+        <thead><tr><th>Время</th><th>Файл</th><th>Raw</th><th>New</th><th>Статус</th></tr></thead>
+        <tbody id="etlTable"><tr class="empty"><td colspan="5">Загрузка...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+let chart = null, _activeSat = null, etlPollingInterval = null;
+
+(function() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const fmt = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  document.getElementById('dateFrom').value = fmt(new Date(now - 3*86400e3));
+  document.getElementById('dateTo').value = fmt(now);
+  
+  loadSatellites();
+  loadEtlStatus();
+
+  ['productType', 'madThreshold', 'windowSize'].forEach(id => {
+    document.getElementById(id).addEventListener('change', () => { if (_activeSat) loadData(); });
+  });
+})();
+
+function setStatus(msg, type) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = type;
+}
+
+function updateAnalyticsUI(metrics) {
+  const card = document.getElementById('analyticsCard');
+  if (!metrics) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  
+  document.getElementById('valDrift').innerText = metrics.avg_drift;
+  document.getElementById('valJump').innerText = metrics.max_jump;
+  document.getElementById('valRMS').innerText = metrics.noise_rms;
+  
+  const h = metrics.health_idx;
+  const healthEl = document.getElementById('valHealth');
+  healthEl.innerText = h;
+  healthEl.className = 'stat-value ' + (h > 98 ? 'health-good' : h > 90 ? 'health-warning' : 'health-bad');
+}
+
+function renderChart(ts) {
+  const ctx = document.getElementById('chart').getContext('2d');
+  if (chart) { chart.destroy(); chart = null; }
+
+  chart = new Chart(ctx, {
+    type: 'scatter',
+    data: {
+      datasets: [
+        { label: 'Норма', data: ts.filter(p=>!p.is_outlier).map(p=>({x:new Date(p.epoch), y:p.clock_bias})), backgroundColor:'#1f6feb', radius:2 },
+        { label: 'Аномалия', data: ts.filter(p=>p.is_outlier).map(p=>({x:new Date(p.epoch), y:p.clock_bias})), backgroundColor:'#f85149', radius:5 },
+        { label: 'Лок. медиана', data: ts.map(p=>({x:new Date(p.epoch), y:p.median})), borderColor:'rgba(255,206,86,0.5)', borderWidth:1, pointRadius:0, showLine:true, type:'line', tension:0.4 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: {
+        legend: { labels: { color: 'var(--text-secondary)' } },
+        zoom: { pan: {enabled:true, mode:'xy'}, zoom: {wheel:{enabled:true}, pinch:{enabled:true}, mode:'xy'} },
+      },
+      scales: {
+        x: { type:'time', time:{tooltipFormat:'yyyy-MM-dd HH:mm:ss', displayFormats:{hour:'HH:mm', day:'dd MMM', week:'dd MMM'}}, ticks:{color:'var(--text-tertiary)'}, grid:{color:'var(--border-color)'} },
+        y: { ticks:{color:'var(--text-tertiary)'}, grid:{color:'var(--border-color)'}, title:{display:true, text:'Clock Bias (ns)', color:'var(--text-secondary)'} },
+      },
+    },
+  });
+}
+
+function resetZoom() { chart?.resetZoom(); }
+
+async function loadSatellites() {
+  try {
+    const res = await fetch('/api/satellites');
+    const data = await res.json();
+    const chips = document.getElementById('satChips');
+    chips.innerHTML = '';
+    data.satellites.forEach(s => {
+      const c = document.createElement('span');
+      c.className = 'chip';
+      c.textContent = s.sat_id;
+      c.onclick = () => {
+        document.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
+        c.classList.add('active');
+        _activeSat = s.sat_id;
+        loadData();
+      };
+      chips.appendChild(c);
+    });
+  } catch(e) { setStatus('Ошибка загрузки спутников: ' + e.message, 'error'); }
+}
+
+async function loadData() {
+  if (!_activeSat) { setStatus('Выберите спутник', 'error'); return; }
+
+  const from = document.getElementById('dateFrom').value;
+  const to = document.getElementById('dateTo').value;
+  const threshold = document.getElementById('madThreshold').value;
+  const windowSize = document.getElementById('windowSize').value;
+  const productType = document.getElementById('productType').value;
+
+  setStatus(`Загрузка для ${_activeSat} (${productType})...`, 'info');
+  updateAnalyticsUI(null);
+
+  try {
+    const url = `/api/data/${_activeSat}?from=${from}&to=${to}&threshold=${threshold}&window_size=${windowSize}&type=${productType}`;
+    const res = await fetch(url);
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Ошибка API');
+
+    renderChart(result.data);
+    updateAnalyticsUI(result.analytics);
+    setStatus(`Загружено ${result.data.length} точек для ${_activeSat}`, 'ok');
+  } catch(e) {
+    setStatus(`Ошибка: ${e.message}`, 'error');
+    if (chart) { chart.destroy(); chart = null; }
+    updateAnalyticsUI(null);
+  }
+}
+
+async function loadEtlStatus() {
+  try {
+    const res = await fetch('/api/etl/status');
+    const data = await res.json();
+    const tbody = document.getElementById('etlTable');
+    if (!data.runs?.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">ETL ещё не запускался</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.runs.map(r => `
+      <tr>
+        <td>${r.started_at ? r.started_at.replace('T',' ').slice(0,19) : '—'}</td>
+        <td style="font-family:monospace;font-size:.78rem">${r.ftp_file || '—'}</td>
+        <td>${r.records_raw ?? 0}</td>
+        <td>${r.records_new ?? 0}</td>
+        <td><span class="badge ${r.status}">${r.status}</span></td>
+      </tr>`).join('');
+  } catch(e) {
+    document.getElementById('etlTable').innerHTML = '<tr><td colspan="5" class="empty">Ошибка загрузки лога</td></tr>';
+  }
+}
+
+async function triggerEtl() {
+  if (!confirm(`Запустить ETL для загрузки свежих данных с FTP?`)) return;
+  setStatus('Запуск ETL...', 'info');
+  try {
+    const res = await fetch('/api/admin/etl', { method: 'POST' });
+    if (!res.ok) { const data = await res.json(); throw new Error(data.error || 'ETL failed'); }
+    setStatus('ETL запущен... Ожидание завершения', 'info');
+    startEtlPolling();
+  } catch(e) { setStatus('Ошибка запуска ETL: ' + e.message, 'error'); }
+}
+
+function startEtlPolling() {
+  clearInterval(etlPollingInterval);
+  etlPollingInterval = setInterval(async () => {
+    try {
+      const res = await fetch('/api/admin/etl/status');
+      const data = await res.json();
+      if (data.status === 'completed') {
+        clearInterval(etlPollingInterval);
+        const result = data.result || {};
+        setStatus(`ETL завершён: ${result.files_processed || 0} файлов, ${result.records_new || 0} новых записей.`, 'ok');
+        setTimeout(() => { loadEtlStatus(); loadSatellites(); }, 500);
+      } else if (data.status === 'failed') {
+        clearInterval(etlPollingInterval);
+        setStatus(`Ошибка ETL: ${data.error}`, 'error');
+      }
+    } catch(e) { clearInterval(etlPollingInterval); }
+  }, 2000);
+}
+</script>
+</body>
+</html>

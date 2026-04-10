@@ -41,13 +41,16 @@ gnss-clock-detector/
 ## Формат файлов
 
 ### GLONASS-IAC FTP
+```text
+ftp://ftp.glonass-iac.ru/MCC/PRODUCTS/<YYYYDDD>/<subdir>/
+    Stark_<YYMMDDHR>.clk    ← RINEX CLK ultra (slots 00, 06, 12, 18)
+    Sta26093.clk            ← RINEX CLK rapid/final (daily)
+    Stark_1D_<YYMMDDHR>.sp3 ← SP3 ultra, day-long
 ```
-ftp://ftp.glonass-iac.ru/MCC/PRODUCTS/<YYYYDDD>/ultra/
-    Stark_<YYMMDDHR>.clk    ← RINEX CLK, ~5 мин, ~500 KB  ✓ приоритет
-    Stark_<YYMMDDHR>.sp3    ← SP3 ultra-rapid, ~80 KB
-    Stark_1D_<YYMMDDHR>.sp3 ← SP3 1-day, ~326 KB
-```
-Примеры каталогов: `26079` (20 марта 2026), файлов: `Stark_26032000.clk`
+**Изменения:**
+- Алгоритм автоматически проверяет директории в порядке: `final` → `rapid` → `ultra` (согласно приоритету качества данных).
+- Собирает все `.clk`, `.sp3` и их сжатые версии `.Z`, `.gz`.
+- При вставке в базу используется `ON CONFLICT DO NOTHING`, что делает ETL идемпотентным и исключает конфликты при дубликатах спутник+эпоха+источник данных из разных файлов.
 
 ### NASA CDDIS HTTPS
 ```

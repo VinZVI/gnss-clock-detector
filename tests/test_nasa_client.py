@@ -20,8 +20,8 @@ def test_candidate_urls_igs3():
         candidates = _candidate_urls(2410, 5, 6)
         fnames = [fname for _, fname in candidates]
 
-        # Первые — IGS3-формат
-        assert any("IGS0OPSULT" in f for f in fnames), f"IGS3 not found: {fnames}"
+        # Первые — IGS3-формат (теперь используем OPSULT вместо IGS0)
+        assert any("OPSULT" in f for f in fnames), f"IGS3 not found: {fnames}"
         # Есть и legacy как запасной
         assert any("igu2410" in f for f in fnames), f"legacy not found: {fnames}"
 
@@ -48,7 +48,8 @@ def test_igs3_name_clk():
     from datetime import datetime, timezone
 
     dt = datetime(2026, 3, 20, 0, 0, tzinfo=timezone.utc)
-    name = _igs3_name(dt, 6, "CLK")
+    names = _igs3_name(dt, 6, "CLK")
+    name = names[0] # берём первый из списка для проверки
     # DOY 079, год 2026
     assert "2026079" in name
     assert name.endswith(".CLK.gz")
@@ -60,7 +61,8 @@ def test_igs3_name_sp3():
     from datetime import datetime, timezone
 
     dt = datetime(2026, 3, 20, 0, 0, tzinfo=timezone.utc)
-    name = _igs3_name(dt, 0, "SP3")
+    names = _igs3_name(dt, 0, "SP3")
+    name = names[0]
     assert "2026079" in name
     assert name.endswith(".SP3.gz")
 

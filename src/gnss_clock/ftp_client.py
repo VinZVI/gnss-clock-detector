@@ -97,15 +97,7 @@ def _download(ftp: ftplib.FTP, name: str) -> Optional[bytes]:
 
 def _candidates(dt, slot_h: int) -> List[Tuple[str, Optional[str]]]:
     """
-    Возвращает [(имя_файла, суффикс_сжатия|None), ...] в порядке приоритета.
-
-    Порядок (из config.FILE_PRIORITY):
-        Stark_YYMMDDHR.clk          ← RINEX CLK без архива  ✓ приоритет
-        Stark_YYMMDDHR.clk.Z        ← RINEX CLK сжатый
-        Stark_YYMMDDHR.sp3          ← SP3 ultra
-        Stark_YYMMDDHR.sp3.Z
-        Stark_1D_YYMMDDHR.sp3       ← SP3 1-day
-        Stark_1D_YYMMDDHR.sp3.Z
+    Кандидаты для ultra: Stark_YYMMDDHR.clk / .sp3 / 1D.sp3
     """
     prefix = config.PRODUCT_PREFIX
     candidates = []
@@ -117,6 +109,33 @@ def _candidates(dt, slot_h: int) -> List[Tuple[str, Optional[str]]]:
     return candidates
 
 
+def _candidates_daily(dt, prefix: str) -> List[Tuple[str, Optional[str]]]:
+    """
+    Кандидаты для rapid/final: один файл в сутки.
+    На FTP final/rapid папки используют формат GPS-недели! (StaWWWW D.clk)
+    Пример: Sta24105.clk (Неделя 2410, День 5)
+    Также оставляем старый формат на случай, если он где-то используется.
+    """
+    from .gps_time import utc_to_gps_week
+
+    yy  = dt.year % 100
+    doy = dt.timetuple().tm_yday
+    stem_doy = f"{prefix}{yy:02d}{doy:03d}"
+
+    week, dow = utc_to_gps_week(dt)
+    stem_gps = f"{prefix}{week:04d}{dow}"
+
+    cands = []
+    for stem in [stem_gps, stem_doy]:
+        cands.extend([
+            (stem + ".clk", None),
+            (stem + ".clk.Z", ".Z"),
+            (stem + ".sp3", None),
+            (stem + ".sp3.Z", ".Z"),
+        ])
+    return cands
+
+
 # ---------------------------------------------------------------------------
 # Публичный API
 # ---------------------------------------------------------------------------
@@ -124,14 +143,19 @@ def _candidates(dt, slot_h: int) -> List[Tuple[str, Optional[str]]]:
 def iter_new_files(
     days_back: int = config.ETL_DAYS_BACK,
     already_loaded: set[str] | None = None,
-) -> Iterator[tuple[str, str]]:
+) -> Iterator[tuple[str, str, str]]:
     """
     Подключается к FTP, итерирует слоты за days_back дней (от новых к старым).
-    Для каждого слота возвращает (filename, text_content) первого найденного файла.
+    Для каждого слота проверяет поддиректории в порядке приоритета:
+        final (появляется через ~4 дня) → rapid → ultra
+    Возвращает (filename, text_content) первого найденного файла.
     Файлы из already_loaded пропускаются без скачивания.
     """
     if already_loaded is None:
         already_loaded = set()
+
+    # Приоритет: final лучше всего, потом rapid, потом ultra
+    SUBDIRS = ["final", "rapid", "ultra"]
 
     slots = slots_to_fetch(days_back)
     logger.info("FTP: %d слотов за %d дней", len(slots), days_back)
@@ -143,43 +167,59 @@ def iter_new_files(
             ftp.set_pasv(True)
             logger.info("FTP: соединение %s", config.FTP_HOST)
 
-            _cached_dir: tuple[str, list[str]] = ("", [])  # (path, names) кэш листинга
+            # Кэш листингов: path -> list[str]
+            _dir_cache: dict[str, list[str]] = {}
 
             for dt, slot_h in slots:
-                # Каталог: /MCC/PRODUCTS/26079/ultra/
-                dir_tag  = date_to_dir(dt)
-                ftp_path = f"{config.FTP_BASE}/{dir_tag}/{config.FTP_SUBDIR}"
+                dir_tag = date_to_dir(dt)
+                
+                for subdir in SUBDIRS:
+                    
+                    ftp_path = f"{config.FTP_BASE}/{dir_tag}/{subdir}"
 
-                # Получаем листинг (кэшируем для одного дня — 4 слота)
-                if _cached_dir[0] != ftp_path:
-                    names = _list_dir(ftp, ftp_path)
-                    _cached_dir = (ftp_path, names)
-                else:
-                    names = _cached_dir[1]
+                    if ftp_path not in _dir_cache:
+                        _dir_cache[ftp_path] = _list_dir(ftp, ftp_path)
+                        logger.info("FTP ls %s → %d файлов", ftp_path, len(_dir_cache[ftp_path]))
 
-                if not names:
-                    continue
-
-                server_set = set(names)
-
-                for fname, compression in _candidates(dt, slot_h):
-                    if fname in already_loaded:
-                        logger.debug("  пропуск (уже загружен): %s", fname)
-                        break  # файл этого слота уже в БД
-
-                    if fname not in server_set:
+                    names = _dir_cache[ftp_path]
+                    if not names:
                         continue
 
-                    raw = _download(ftp, fname)
-                    if raw is None:
-                        continue
+                    server_set = set(names)
+                    current_candidates = []
 
-                    text = _decompress(raw, fname)
-                    if text is None:
-                        continue
+                    # 1. Суточные (Daily)
+                    for p in ["Sta", "IPG", "IAU", "IAC"]:
+                        current_candidates.extend(_candidates_daily(dt, p))
 
-                    yield fname, text
-                    break   # нашли лучший файл для слота — переходим к следующему
+                    # 2. 6-часовые слоты (теперь ищем везде, не только в ultra)
+                    current_candidates.extend(_candidates(dt, slot_h))
+
+                    # 3. Высокоточные 30с (только в final)
+                    if subdir == "final":
+                        from .gps_time import utc_to_gps_week
+                        week, dow = utc_to_gps_week(dt)
+                        current_candidates.append((f"Sta30s{week:04d}{dow}.clk", None))
+
+                    for fname, compression in current_candidates:
+                        key = f"{subdir}/{fname}"
+                        if key in already_loaded:
+                            logger.debug("  пропуск (уже загружен): %s", key)
+                            break
+
+                        if fname not in server_set:
+                            continue
+
+                        raw = _download(ftp, fname)
+                        if raw is None:
+                            continue
+
+                        text = _decompress(raw, fname)
+                        if text is None:
+                            continue
+
+                        yield fname, text, subdir
+                        break
 
     except ftplib.all_errors as exc:
         logger.error("FTP ошибка: %s", exc)

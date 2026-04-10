@@ -8,7 +8,7 @@
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
-  <!-- Hammer.js -->
+  <!-- Hammer.js (touch events для zoom плагина) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
   <!-- chartjs-plugin-zoom -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
@@ -29,16 +29,9 @@
     .field select, .field input {
       background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
       color: #e6edf3; padding: 7px 11px; font-size: .88rem; outline: none; transition: border-color .2s;
-      font-family: inherit;
     }
     .field select:focus, .field input:focus { border-color: #58a6ff; }
     .field input[type=number] { width: 80px; }
-    .field input[type=date] { min-width: 140px; }
-
-    /* Очистка формата дат на ОС / Браузерах с нестандартным стилем отображения локали */
-    .field input[type=date] { lang: "fr-CA"; }
-    ::-webkit-datetime-edit { padding: 1px; }
-    ::-webkit-datetime-edit-weekday-field { display: none; }
 
     .btn { padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer; font-size: .88rem; font-weight: 500; transition: opacity .2s; }
     .btn:hover { opacity: .82; }
@@ -55,15 +48,11 @@
     .stat-card .value { font-size: 1.5rem; font-weight: 700; color: #58a6ff; }
     .stat-card .value.danger { color: #f85149; }
 
-    .health-good { color: #56d364 !important; }
-    .health-warning { color: #d29922 !important; }
-    .health-bad { color: #f85149 !important; }
-
     .card { background: #161b22; border: 1px solid #21262d; border-radius: 10px; padding: 18px; margin-bottom: 20px; }
     .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px; }
     .card-header h2 { font-size: .88rem; color: #8b949e; }
     .chart-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-
+    
     .chart-hint { font-size: .72rem; color: #484f58; margin-top: 8px; text-align: center; }
     .chart-wrap { position: relative; height: 340px; }
 
@@ -96,7 +85,7 @@
   <div style="font-size:1.4rem">🛰️</div>
   <div>
     <h1>GNSS Clock Anomaly Detector</h1>
-    <p>Rolling Window MAD-based outlier detection & Stability Analytics</p>
+    <p>Rolling Window MAD-based outlier detection from GLONASS-IAC FTP</p>
   </div>
 </header>
 
@@ -104,14 +93,6 @@
 
   <!-- ── Панель управления ──────────────────────────────────────────── -->
   <div class="controls">
-    <div class="field">
-      <label>Тип данных</label>
-      <select id="productType">
-        <option value="final">Final</option>
-        <option value="rapid" selected>Rapid</option>
-        <option value="ultra">Ultra-Rapid</option>
-      </select>
-    </div>
     <div class="field">
       <label>От</label>
       <input type="date" id="dateFrom" />
@@ -148,19 +129,6 @@
     <div class="stat-card"><div class="label">Точек</div><div class="value" id="statTotal">—</div></div>
     <div class="stat-card"><div class="label">Аномалий</div><div class="value danger" id="statAnom">—</div></div>
     <div class="stat-card"><div class="label">% аномалий</div><div class="value" id="statRate">—</div></div>
-  </div>
-
-  <!-- ── Аналитика (Новая часть) ──────────────────────────────────── -->
-  <div class="card" id="analyticsCard" style="display: none;">
-    <div class="card-header">
-      <h2>Аналитика стабильности</h2>
-    </div>
-    <div class="stats-grid">
-      <div class="stat-card"><div class="label">Средний дрейф</div><div class="value" id="valDrift">—</div></div>
-      <div class="stat-card"><div class="label">Макс. скачок</div><div class="value" id="valJump">—</div></div>
-      <div class="stat-card"><div class="label">Индекс здоровья</div><div class="value" id="valHealth">—</div></div>
-      <div class="stat-card"><div class="label">Шум (RMS)</div><div class="value" id="valRMS">—</div></div>
-    </div>
   </div>
 
   <!-- ── График ────────────────────────────────────────────────────── -->
@@ -201,7 +169,7 @@
   <!-- ── Лог ETL ────────────────────────────────────────────────────── -->
   <div class="card">
     <div class="card-header">
-      <h2>Последние запуски ETL</h2>
+      <h2>Последние запуски ETL с FTP</h2>
       <div>
         <button class="btn btn-secondary btn-sm" onclick="triggerEtl()">▶ Запустить ETL</button>
         <button class="btn btn-warn btn-sm" onclick="loadEtlStatus()">Обновить лог</button>
@@ -218,10 +186,16 @@
 </div>
 
 <script>
+// ─────────────────────────────────────────────────────────────────────────────
+// Состояние
+// ─────────────────────────────────────────────────────────────────────────────
 let chart       = null;
 let _activeSat  = null;
 let etlPollingInterval = null;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Инициализация
+// ─────────────────────────────────────────────────────────────────────────────
 (function() {
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
@@ -231,9 +205,8 @@ let etlPollingInterval = null;
 
   loadSatellites();
   loadEtlStatus();
-
+  
   const updateOnInput = () => { if (_activeSat) loadData(); };
-  document.getElementById('productType').addEventListener('change', updateOnInput);
   document.getElementById('madThreshold').addEventListener('input', updateOnInput);
   document.getElementById('windowSize').addEventListener('input', updateOnInput);
 })();
@@ -243,21 +216,9 @@ function setStatus(msg, type) {
   el.textContent = msg; el.className = type;
 }
 
-function updateAnalyticsUI(metrics) {
-  const card = document.getElementById('analyticsCard');
-  if (!metrics) { card.style.display = 'none'; return; }
-  card.style.display = 'block';
-
-  document.getElementById('valDrift').innerHTML = metrics.avg_drift + ' <span style="font-size:0.5em;color:#8b949e">нс/с</span>';
-  document.getElementById('valJump').innerHTML = metrics.max_jump + ' <span style="font-size:0.5em;color:#8b949e">нс</span>';
-  document.getElementById('valRMS').innerHTML = metrics.noise_rms + ' <span style="font-size:0.5em;color:#8b949e">нс</span>';
-
-  const h = metrics.health_idx;
-  const healthEl = document.getElementById('valHealth');
-  healthEl.innerHTML = h + ' <span style="font-size:0.5em;color:#8b949e">%</span>';
-  healthEl.className = 'value ' + (h > 98 ? 'health-good' : h > 90 ? 'health-warning' : 'health-bad');
-}
-
+// ─────────────────────────────────────────────────────────────────────────────
+// График и таблица
+// ─────────────────────────────────────────────────────────────────────────────
 function renderChart(ts) {
   const ctx = document.getElementById('chart').getContext('2d');
   if (chart) {
@@ -308,10 +269,10 @@ function renderChart(ts) {
               const p = ts[ctx.dataIndex];
               if (!p) return '';
               return [
-                ' bias:  ' + (p.clock_bias||0).toFixed(3) + ' нс',
-                ' score: ' + (p.score||0),
-                ' median: ' + (p.median||0).toFixed(3) + ' нс',
-                ' ' + (p.is_outlier ? '⚠ АНОМАЛИЯ' : '✓ норма'),
+                ` bias:  ${p.clock_bias.toFixed(3)} нс`,
+                ` score: ${p.score}`,
+                ` median: ${p.median.toFixed(3)} нс`,
+                ` ${p.is_outlier ? '⚠ АНОМАЛИЯ' : '✓ норма'}`,
               ];
             }
           }
@@ -325,14 +286,14 @@ function renderChart(ts) {
         x: {
           type: 'time',
           time: {
+            unit: 'hour',
             tooltipFormat: 'yyyy-MM-dd HH:mm:ss',
             displayFormats: {
-              minute: 'HH:mm',
               hour: 'HH:mm',
               day: 'MMM dd'
             }
           },
-          ticks:  { color: '#484f58', maxRotation: 0, autoSkip: true },
+          ticks:  { color: '#484f58' },
           grid:   { color: '#21262d' },
         },
         y: {
@@ -349,7 +310,7 @@ function renderAnomalyTable(ts) {
   const tbody = document.getElementById('anomalyTable');
   const anom  = ts.filter(p => p.is_outlier);
 
-  document.getElementById('anomCountBadge').textContent = anom.length ? '(' + anom.length + ' шт.)' : '';
+  document.getElementById('anomCountBadge').textContent = anom.length ? `(${anom.length} шт.)` : '';
 
   if (!anom.length) {
     tbody.innerHTML = '<tr><td colspan="5" class="empty">Аномалий не обнаружено</td></tr>';
@@ -357,23 +318,26 @@ function renderAnomalyTable(ts) {
   }
   tbody.innerHTML = anom.map(p => `
     <tr>
-      <td>${p.epoch ? new Date(p.epoch).toISOString().replace('T', ' ').slice(0, 19) : ''}</td>
-      <td>${(p.clock_bias||0).toFixed(3)}</td>
-      <td><span class="badge anomaly">${p.score||0}</span></td>
-      <td>${(p.median||0).toFixed(3)}</td>
-      <td>${(p.mad||0).toFixed(3)}</td>
+      <td>${p.epoch.replace('T',' ').slice(0,19)}</td>
+      <td>${p.clock_bias.toFixed(3)}</td>
+      <td><span class="badge anomaly">${p.score}</span></td>
+      <td>${p.median.toFixed(3)}</td>
+      <td>${p.mad.toFixed(3)}</td>
     </tr>`).join('');
 }
 
 function resetZoom() { chart?.resetZoom(); }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Загрузка данных с API
+// ─────────────────────────────────────────────────────────────────────────────
 async function loadSatellites() {
   try {
     const res  = await fetch('/api/satellites');
     const data = await res.json();
     const chips = document.getElementById('satChips');
     chips.innerHTML = '';
-    if (!data.satellites || !data.satellites.length) {
+    if (!data.satellites?.length) {
       chips.innerHTML = '<span class="empty">Нет данных — запустите ETL</span>';
       return;
     }
@@ -399,66 +363,60 @@ async function loadData() {
   const to    = document.getElementById('dateTo').value;
   const threshold = parseFloat(document.getElementById('madThreshold').value) || 3.0;
   const windowSize = parseInt(document.getElementById('windowSize').value, 10) || 15;
-  const productType = document.getElementById('productType').value;
 
   if (!from || !to) { setStatus('Укажите даты', 'error'); return; }
 
-  setStatus('Загрузка для ' + _activeSat + ' [' + productType.toUpperCase() + ']...', 'info');
-  updateAnalyticsUI(null);
+  setStatus(`Загрузка для ${_activeSat}...`, 'info');
 
   try {
-    const url = '/api/data/' + _activeSat + '?from=' + from + '&to=' + to + '&threshold=' + threshold + '&window_size=' + windowSize + '&type=' + productType;
+    const url = `/api/clock-series?sat_id=${_activeSat}&from=${from}&to=${to}&threshold=${threshold}&window_size=${windowSize}`;
     const res  = await fetch(url);
     const data = await res.json();
     if (!res.ok) {
       throw new Error(data.error || 'Ошибка API');
     }
 
-    const points = data.data || [];
-    const anomCount = points.filter(p => p.is_outlier).length;
-
     document.getElementById('statSat').textContent   = _activeSat;
-    document.getElementById('statTotal').textContent = points.length;
-    document.getElementById('statAnom').textContent  = anomCount;
-    document.getElementById('statRate').textContent  = points.length > 0 ? (anomCount / points.length * 100).toFixed(1) + '%' : '0%';
+    document.getElementById('statTotal').textContent = data.count;
+    document.getElementById('statAnom').textContent  = data.anomalies;
+    document.getElementById('statRate').textContent  = data.count > 0 ? (data.anomalies / data.count * 100).toFixed(1) + '%' : '0%';
 
-    renderChart(points);
-    renderAnomalyTable(points);
+    renderChart(data.timeseries);
+    renderAnomalyTable(data.timeseries);
 
-    if(data.analytics) {
-      updateAnalyticsUI(data.analytics);
-    }
-
-    setStatus(_activeSat + ': ' + points.length + ' точек загружено [' + productType.toUpperCase() + ']', 'ok');
+    setStatus(`${_activeSat}: ${data.count} точек загружено`, 'ok');
   } catch(e) {
-    setStatus('Ошибка: ' + e.message, 'error');
+    setStatus(`Ошибка: ${e.message}`, 'error');
     if (chart) {
       chart.destroy();
       chart = null;
     }
-    document.getElementById('anomalyTable').innerHTML = '<tr><td colspan="5" class="empty">' + e.message + '</td></tr>';
+    document.getElementById('anomalyTable').innerHTML = `<tr><td colspan="5" class="empty">${e.message}</td></tr>`;
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ETL
+// ─────────────────────────────────────────────────────────────────────────────
 async function loadEtlStatus() {
   try {
     const res  = await fetch('/api/etl/status');
     const data = await res.json();
     const tbody = document.getElementById('etlTable');
-    if (!data.runs || !data.runs.length) {
+    if (!data.runs?.length) {
       tbody.innerHTML = '<tr><td colspan="5" class="empty">ETL ещё не запускался</td></tr>';
       return;
     }
     tbody.innerHTML = data.runs.map(r => {
       const t      = r.started_at ? r.started_at.replace('T',' ').slice(0,19) : '—';
       const cls    = r.status === 'ok' ? 'ok' : 'anomaly';
-      return '<tr>' +
-        '<td>' + t + '</td>' +
-        '<td style="font-family:monospace;font-size:.78rem">' + (r.ftp_file || '—') + '</td>' +
-        '<td>' + (r.records_raw ?? 0) + '</td>' +
-        '<td>' + (r.records_new ?? 0) + '</td>' +
-        '<td><span class="badge ' + cls + '">' + r.status + '</span></td>' +
-      '</tr>';
+      return `<tr>
+        <td>${t}</td>
+        <td style="font-family:monospace;font-size:.78rem">${r.ftp_file || '—'}</td>
+        <td>${r.records_raw  ?? 0}</td>
+        <td>${r.records_new  ?? 0}</td>
+        <td><span class="badge ${cls}">${r.status}</span></td>
+      </tr>`;
     }).join('');
   } catch(e) {
     console.error("ETL status error:", e);
@@ -467,14 +425,14 @@ async function loadEtlStatus() {
 }
 
 async function triggerEtl() {
-  if (!confirm('Запустить ETL для загрузки свежих данных с FTP?')) return;
-
+  if (!confirm(`Запустить ETL для загрузки свежих данных с FTP?`)) return;
+  
   setStatus('Запуск ETL...', 'info');
   try {
     const res = await fetch('/api/admin/etl', { method: 'POST' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'ETL failed');
-
+    
     setStatus('ETL запущен... Ожидание завершения', 'info');
     startEtlPolling();
   } catch(e) {
@@ -488,18 +446,18 @@ function startEtlPolling() {
     try {
       const res = await fetch('/api/admin/etl/status');
       const data = await res.json();
-
+      
       if (data.status === 'completed') {
         clearInterval(etlPollingInterval);
         const result = data.result || {};
-        setStatus('ETL завершён: обработано ' + (result.files_processed || 0) + ' файлов, ' + (result.records_new || 0) + ' новых записей.', 'ok');
+        setStatus(`ETL завершён: обработано ${result.files_processed || 0} файлов, ${result.records_new || 0} новых записей.`, 'ok');
         setTimeout(() => {
           loadEtlStatus();
           loadSatellites();
         }, 500);
       } else if (data.status === 'failed') {
         clearInterval(etlPollingInterval);
-        setStatus('Ошибка ETL: ' + data.error, 'error');
+        setStatus(`Ошибка ETL: ${data.error}`, 'error');
       }
     } catch(e) {
       console.error('Polling error:', e);

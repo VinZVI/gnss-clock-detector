@@ -10,47 +10,23 @@ db = SQLAlchemy()
 
 
 class SatClock(db.Model):
-    """Сырые clock-записи, загруженные с FTP или NASA CDDIS."""
+    """Сырые clock-записи, загруженные с FTP."""
     __tablename__ = "sat_clock"
 
-    id         = db.Column(db.Integer,  primary_key=True)
-    sat_id     = db.Column(db.String(10), nullable=False, index=True)
-    epoch      = db.Column(db.DateTime,   nullable=False, index=True)
-    clock_bias = db.Column(db.Float,      nullable=False)   # нс
-    source     = db.Column(db.String(60), default="glonass-iac")
-    created_at = db.Column(db.DateTime,   default=_utcnow)
+    id           = db.Column(db.Integer, primary_key=True)
+    sat_id       = db.Column(db.String(10), nullable=False, index=True)
+    epoch        = db.Column(db.DateTime, nullable=False, index=True)
+    clock_bias   = db.Column(db.Float, nullable=False)
+    source       = db.Column(db.String(10), default="ftp")
+    product_type = db.Column(db.String(10), default="ultra", index=True) # final, rapid, ultra
+    created_at   = db.Column(db.DateTime, default=_utcnow)
 
     __table_args__ = (
-        db.UniqueConstraint("sat_id", "epoch", "source", name="uix_sat_epoch_source"),
+        db.UniqueConstraint("sat_id", "epoch", "product_type", name="uix_sat_epoch_product"),
     )
 
     def __repr__(self):
-        return f"<SatClock {self.sat_id} {self.epoch} {self.clock_bias:.2f} ns>"
-
-
-class SatClockAnomaly(db.Model):
-    """Результаты MAD-детекции аномалий."""
-    __tablename__ = "sat_clock_anomaly"
-
-    id              = db.Column(db.Integer,  primary_key=True)
-    sat_id          = db.Column(db.String(10), nullable=False, index=True)
-    epoch           = db.Column(db.DateTime,   nullable=False, index=True)
-    clock_bias      = db.Column(db.Float,      nullable=False)     # нс
-    delta_clock     = db.Column(db.Float)                          # нс/с
-    is_outlier      = db.Column(db.Boolean,    default=False, index=True)
-    score           = db.Column(db.Float)                          # |x-med|/MAD
-    median          = db.Column(db.Float)
-    mad             = db.Column(db.Float)
-    detection_method = db.Column(db.String(10), default='bias')   # 'bias' or 'delta'
-    processed_at    = db.Column(db.DateTime,   default=_utcnow)
-
-    __table_args__ = (
-        db.UniqueConstraint("sat_id", "epoch", "detection_method", name="uix_anomaly_sat_epoch_method"),
-    )
-
-    def __repr__(self):
-        flag = "⚠" if self.is_outlier else "✓"
-        return f"<SatClockAnomaly {flag} {self.sat_id} {self.epoch}>"
+        return f"<SatClock {self.sat_id} {self.epoch} {self.product_type}>"
 
 
 class EtlLog(db.Model):
@@ -61,8 +37,19 @@ class EtlLog(db.Model):
     started_at   = db.Column(db.DateTime, default=_utcnow, index=True)
     finished_at  = db.Column(db.DateTime)
     ftp_file     = db.Column(db.String(120))
-    data_source  = db.Column(db.String(20), default="ftp")    # ftp | nasa | test
     records_raw  = db.Column(db.Integer, default=0)
     records_new  = db.Column(db.Integer, default=0)
-    status       = db.Column(db.String(20), default="running")  # running|ok|error
+    status       = db.Column(db.String(20), default="running")
     message      = db.Column(db.Text)
+
+    def as_dict(self):
+        return {
+            "id": self.id,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "finished_at": self.finished_at.isoformat() if self.finished_at else None,
+            "ftp_file": self.ftp_file,
+            "records_raw": self.records_raw,
+            "records_new": self.records_new,
+            "status": self.status,
+            "message": self.message,
+        }
