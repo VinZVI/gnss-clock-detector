@@ -8,6 +8,7 @@ from gnss_clock.models import db
 
 def fix_unique_constraint():
     """Drop old index and create new one with detection_method column."""
+
     app = create_app()
     
     with app.app_context():
