@@ -33,13 +33,9 @@ def calculate_satellite_analytics(
     else:
         drift = 0
 
-    # --- Максимальный скачок (нс) ---
-    jumps = []
-    if len(detection_results) > 1:
-        for i in range(1, len(detection_results)):
-            jump = abs(detection_results[i].clock_bias - detection_results[i-1].clock_bias)
-            jumps.append(jump)
-    max_jump = max(jumps) if jumps else 0
+    # --- Максимальный скачок (нс) --- считается только по чистым точкам
+    jumps = np.abs(np.diff(biases))
+    max_jump = float(jumps.max()) if len(jumps) > 0 else 0
 
     # --- Индекс здоровья (%) ---
     actual_points = len(clean_data)

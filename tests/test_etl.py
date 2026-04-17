@@ -1,12 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from gnss_clock.etl import _get_product_type_from_filename, run_etl
-
-def test_get_product_type_from_filename():
-    assert _get_product_type_from_filename("igs22954.clk_30s") == "final"
-    assert _get_product_type_from_filename("igr22954.clk") == "rapid"
-    assert _get_product_type_from_filename("igu22954_12.clk") == "ultra"
-    assert _get_product_type_from_filename("UNKNOWN.txt") == "ultra"
+from gnss_clock.etl import run_etl
 
 @patch("gnss_clock.etl._get_app")
 @patch("gnss_clock.etl.ftp_iter")

@@ -23,44 +23,13 @@ import ftplib
 import gzip
 import io
 import logging
-from typing import Iterator, Optional
+from typing import Iterator, List, Optional, Tuple
 
 from . import config
 from .gps_time import date_to_dir, file_stem, slots_to_fetch
+from .utils import decompress as _decompress
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Decompress
-# ---------------------------------------------------------------------------
-
-def _decompress(data: bytes, filename: str) -> Optional[str]:
-    lo = filename.lower()
-
-    if lo.endswith(".z"):
-        try:
-            import unlzw3
-            return unlzw3.unlzw(data).decode("utf-8", errors="replace")
-        except ImportError:
-            logger.warning("unlzw3 не установлен, пробуем gzip-fallback для %s", filename)
-        except Exception as exc:
-            logger.warning("unlzw3 ошибка %s: %s, пробуем gzip-fallback", filename, exc)
-        try:
-            return gzip.decompress(data).decode("utf-8", errors="replace")
-        except Exception:
-            logger.error("Не удалось распаковать %s. pip install unlzw3", filename)
-            return None
-
-    if lo.endswith(".gz"):
-        try:
-            return gzip.decompress(data).decode("utf-8", errors="replace")
-        except Exception as exc:
-            logger.error("gzip ошибка %s: %s", filename, exc)
-            return None
-
-    # файл не сжат (как Stark_*.clk / *.sp3 на glonass-iac)
-    return data.decode("utf-8", errors="replace")
 
 
 # ---------------------------------------------------------------------------

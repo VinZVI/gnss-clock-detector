@@ -19,15 +19,6 @@ from .ftp_client import iter_new_files as ftp_iter
 logger = logging.getLogger(__name__)
 
 
-def _get_product_type_from_filename(filename: str) -> str:
-    """Определяет тип продукта по имени файла."""
-    name = filename.lower()
-    if "igs" in name:
-        return "final"
-    if "igr" in name:
-        return "rapid"
-    return "ultra"
-
 
 def _get_app():
     from .app import create_app
@@ -61,7 +52,7 @@ def _load_clocks(app, records: list[dict]) -> int:
                     db.session.add(SatClock(**record))
                     db.session.commit()
                     inserted += 1
-                except:
+                except Exception:
                     db.session.rollback()
             return inserted
 
@@ -79,24 +70,32 @@ def _purge_old_data(app) -> None:
             logger.info("Purge: %d raw clock records (>%d days)", n1, config.ETL_RETAIN_DAYS)
 
 
-def run_etl(days_back: int = config.ETL_DAYS_BACK) -> dict:
+def run_etl(days_back: int = config.ETL_DAYS_BACK, source: str = "ftp") -> dict:
     from .models import db, EtlLog
     app = _get_app()
     stats = {
         "started_at": _utcnow().isoformat(), "files_processed": 0,
-        "records_raw": 0, "records_new": 0, "errors": [],
+        "records_raw": 0, "records_new": 0, "errors": [], "source": source,
     }
     loaded_files = _already_loaded_files(app)
 
-    for fname, text, subdir in ftp_iter(days_back, loaded_files):
+    if source == "nasa":
+        from .nasa_client import iter_new_files as nasa_iter
+        file_iterator = ((fname, text, "ultra") for fname, text in nasa_iter(days_back, loaded_files))
+        record_source = "nasa"
+    else:
+        file_iterator = ftp_iter(days_back, loaded_files)
+        record_source = "ftp"
+
+    for fname, text, subdir in file_iterator:
         records = parse_file(text, fname)
         stats["files_processed"] += 1
         stats["records_raw"] += len(records)
 
-        file_key = f"{subdir}/{fname}"  # уникальный ключ с учётом поддиректории
+        file_key = f"{subdir}/{fname}"
         product_type = subdir  # "ultra", "rapid" или "final"
         for r in records:
-            r["source"] = "ftp"
+            r["source"] = record_source
             r["product_type"] = product_type
 
         with app.app_context():
@@ -118,13 +117,13 @@ def run_etl(days_back: int = config.ETL_DAYS_BACK) -> dict:
                 db.session.commit()
 
     if stats["files_processed"] == 0:
-        logger.warning("Источник 'ftp': 0 новых файлов")
+        logger.warning("Источник '%s': 0 новых файлов", source)
 
     _purge_old_data(app)
     stats["finished_at"] = _utcnow().isoformat()
     logger.info(
-        "ETL завершён [ftp]: файлов=%d, raw=%d, new=%d, ошибок=%d",
-        stats["files_processed"], stats["records_raw"],
+        "ETL завершён [%s]: файлов=%d, raw=%d, new=%d, ошибок=%d",
+        source, stats["files_processed"], stats["records_raw"],
         stats["records_new"], len(stats["errors"]),
     )
     return stats
@@ -132,10 +131,11 @@ def run_etl(days_back: int = config.ETL_DAYS_BACK) -> dict:
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [%(name)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-    p = argparse.ArgumentParser(description="GNSS Clock ETL from FTP")
+    p = argparse.ArgumentParser(description="GNSS Clock ETL")
     p.add_argument("--days", type=int, default=config.ETL_DAYS_BACK)
+    p.add_argument("--source", choices=["ftp", "nasa"], default="ftp")
     args = p.parse_args()
-    stats = run_etl(days_back=args.days)
+    stats = run_etl(days_back=args.days, source=args.source)
     if stats["errors"]:
         sys.exit(1)
 

@@ -18,7 +18,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 from flask import Flask, jsonify, request, send_from_directory
-from sqlalchemy import func
+from sqlalchemy import func, inspect as sa_inspect
 
 from . import config
 from .models import db, SatClock, EtlLog
@@ -40,14 +40,13 @@ def create_app() -> Flask:
     db.init_app(app)
     with app.app_context():
         db.create_all()
-        # Миграция: добавляем product_type, если еще не существует
-        try:
+        # Миграция: добавляем product_type только если колонки нет
+        inspector = sa_inspect(db.engine)
+        cols = [c["name"] for c in inspector.get_columns("sat_clock")]
+        if "product_type" not in cols:
             db.session.execute(db.text("ALTER TABLE sat_clock ADD COLUMN product_type VARCHAR(10)"))
             db.session.commit()
             logger.info("Added 'product_type' column to sat_clock table.")
-        except Exception:
-            db.session.rollback()
-            logger.debug("'product_type' column already exists.")
 
     _register_routes(app)
     return app
@@ -117,12 +116,16 @@ def _register_routes(app: Flask) -> None:
         if _etl_running.get('status') == 'running':
             return jsonify({"error": "ETL already running"}), 409
 
-        def run_etl_background():
+        # Поддержка выбора источника из клиента (ftp или nasa)
+        data = request.get_json(silent=True) or {}
+        source = data.get("source", "ftp")
+
+        def run_etl_background(src):
             _etl_running['status'] = 'running'
             _etl_running['error'] = None
             try:
                 from .etl import run_etl
-                stats = run_etl()
+                stats = run_etl(source=src)
                 _etl_running['status'] = 'completed'
                 _etl_running['result'] = stats
             except Exception as e:
@@ -130,9 +133,9 @@ def _register_routes(app: Flask) -> None:
                 _etl_running['error'] = str(e)
                 logger.error(f"Background ETL failed: {e}", exc_info=True)
 
-        thread = threading.Thread(target=run_etl_background, daemon=True)
+        thread = threading.Thread(target=run_etl_background, args=(source,), daemon=True)
         thread.start()
-        return jsonify({"status": "started", "message": "ETL started in background"}), 202
+        return jsonify({"status": "started", "message": f"ETL ({source}) started in background"}), 202
 
     @app.route("/api/admin/etl/status", methods=["GET"])
     def admin_etl_status():

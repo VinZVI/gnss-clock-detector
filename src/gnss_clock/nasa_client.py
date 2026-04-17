@@ -31,6 +31,7 @@ import requests
 
 from . import config
 from .gps_time import utc_to_gps_week, slot_for, SLOT_HOURS
+from .utils import decompress as _decompress
 
 logger = logging.getLogger(__name__)
 
@@ -228,22 +229,6 @@ def _candidate_urls(gps_week: int, gps_dow: int, slot_h: int) -> list[tuple[str,
 # ---------------------------------------------------------------------------
 # Скачивание + распаковка
 # ---------------------------------------------------------------------------
-
-def _decompress(data: bytes, filename: str) -> Optional[str]:
-    lo = filename.lower()
-    try:
-        if lo.endswith(".gz"):
-            return gzip.decompress(data).decode("utf-8", errors="replace")
-        if lo.endswith(".z"):
-            try:
-                import unlzw3
-                return unlzw3.unlzw(data).decode("utf-8", errors="replace")
-            except ImportError:
-                return gzip.decompress(data).decode("utf-8", errors="replace")
-    except Exception as exc:
-        logger.error("Ошибка распаковки %s: %s", filename, exc)
-        return None
-    return data.decode("utf-8", errors="replace")
 
 
 def _download_url(session: requests.Session, url: str, fname: str) -> Optional[bytes]:

@@ -202,7 +202,11 @@
   <div class="card">
     <div class="card-header">
       <h2>Последние запуски ETL</h2>
-      <div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <select id="etlSource" style="background:#0d1117; color:#e6edf3; border:1px solid #30363d; border-radius:6px; padding:5px 8px; font-size:.78rem;">
+          <option value="ftp">Источник: FTP (BKG/IGS)</option>
+          <option value="nasa">Источник: NASA CDDIS</option>
+        </select>
         <button class="btn btn-secondary btn-sm" onclick="triggerEtl()">▶ Запустить ETL</button>
         <button class="btn btn-warn btn-sm" onclick="loadEtlStatus()">Обновить лог</button>
       </div>
@@ -467,15 +471,20 @@ async function loadEtlStatus() {
 }
 
 async function triggerEtl() {
-  if (!confirm('Запустить ETL для загрузки свежих данных с FTP?')) return;
+  const source = document.getElementById('etlSource').value;
+  if (!confirm('Запустить ETL для загрузки свежих данных с ' + source.toUpperCase() + '?')) return;
 
-  setStatus('Запуск ETL...', 'info');
+  setStatus('Запуск ETL (' + source + ')...', 'info');
   try {
-    const res = await fetch('/api/admin/etl', { method: 'POST' });
+    const res = await fetch('/api/admin/etl', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: source })
+    });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'ETL failed');
 
-    setStatus('ETL запущен... Ожидание завершения', 'info');
+    setStatus('ETL (' + source + ') запущен... Ожидание завершения', 'info');
     startEtlPolling();
   } catch(e) {
     setStatus('Ошибка запуска ETL: ' + e.message, 'error');
