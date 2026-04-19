@@ -1,3 +1,4 @@
+"""Модели данных SQLAlchemy."""
 from datetime import datetime, timezone
 
 def _utcnow():

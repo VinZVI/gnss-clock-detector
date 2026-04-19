@@ -1,3 +1,4 @@
+"""Модуль аналитики временных рядов часов спутников."""
 import numpy as np
 from datetime import datetime
 from typing import List, Dict, Optional

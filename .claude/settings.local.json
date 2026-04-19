@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout *)",
+      "Bash(ls -la *harness* AGENTS* scripts* docs*)",
+      "Bash(python scripts/check_deps.py)",
+      "Bash(python scripts/structural_tests.py)"
+    ]
+  }
+}

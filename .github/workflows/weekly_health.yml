@@ -1,0 +1,32 @@
+name: Weekly Health Check
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # каждый понедельник 06:00 UTC
+  workflow_dispatch:        # ручной запуск из GitHub Actions
+
+jobs:
+  health:
+    name: Weekly Harness Health
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv pip install -e ".[dev]"
+
+      - name: Структурные тесты
+        run: python scripts/structural_tests.py
+
+      - name: Архитектурные зависимости
+        run: python scripts/check_deps.py
+
+      - name: Pytest
+        run: uv run pytest tests/ -v
+
+      - name: Проверка устаревших зависимостей
+        run: pip list --outdated
+        continue-on-error: true   # не блокирует, но показывает в логах

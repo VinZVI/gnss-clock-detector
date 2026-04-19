@@ -14,3 +14,4 @@ build/
 
 # uv
 uv.lock
+.token_cache

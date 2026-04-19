@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  harness:
+    name: Harness Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv pip install -e ".[dev]"
+
+      - name: Структурные тесты репозитория
+        run: python scripts/structural_tests.py
+
+      - name: Архитектурные зависимости (слои)
+        run: python scripts/check_deps.py
+
+      - name: Pytest
+        run: uv run pytest tests/ -v --tb=short
