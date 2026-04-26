@@ -116,7 +116,7 @@ def _purge_old_data(app) -> None:
 
 
 def run_etl(days_back: int = config.ETL_DAYS_BACK, source: str = "ftp") -> dict:
-    from .models import db, EtlLog
+    from .models import db, EtlLog, SatelliteMeta
     app = _get_app()
     stats = {
         "started_at": _utcnow().isoformat(), "files_processed": 0,
@@ -132,12 +132,23 @@ def run_etl(days_back: int = config.ETL_DAYS_BACK, source: str = "ftp") -> dict:
         file_iterator = ftp_iter(days_back, loaded_files)
         record_source = "ftp"
 
-    for fname, text, subdir in file_iterator:
+    # Собираем все новые файлы в список для сортировки
+    all_new_files = list(file_iterator)
+    
+    # Сортировка: .glo (0) -> .hlt (1) -> остальные (.clk, .sp3) (2)
+    def file_priority(item):
+        fname = item[0].lower()
+        if fname.endswith(".glo"): return 0
+        if fname.endswith(".hlt"): return 1
+        return 2
+    
+    all_new_files.sort(key=file_priority)
+
+    for fname, text, subdir in all_new_files:
         file_key = f"{subdir}/{fname}"
         
         if fname.lower().endswith(".glo"):
             from .status_parsers import parse_glo
-            from .models import SatelliteMeta, db
             records = parse_glo(text)
             stats["files_processed"] += 1
             unique_sats = sorted(list(set(r["sat_id"] for r in records)))
@@ -147,7 +158,7 @@ def run_etl(days_back: int = config.ETL_DAYS_BACK, source: str = "ftp") -> dict:
                 log = EtlLog(ftp_file=file_key, records_raw=len(records), processed_sats=processed_sats_str)
                 db.session.add(log)
                 for r in records:
-                    meta = SatelliteMeta.query.get(r['sat_id'])
+                    meta = db.session.get(SatelliteMeta, r['sat_id'])
                     if not meta:
                         db.session.add(SatelliteMeta(**r))
                     else:
@@ -161,7 +172,7 @@ def run_etl(days_back: int = config.ETL_DAYS_BACK, source: str = "ftp") -> dict:
             
         elif fname.lower().endswith(".hlt"):
             from .status_parsers import parse_hlt
-            from .models import SatelliteStatusHistory, db
+            from .models import SatelliteStatusHistory
             records = parse_hlt(text)
             stats["files_processed"] += 1
             unique_sats = sorted(list(set(r["sat_id"] for r in records)))
@@ -172,6 +183,13 @@ def run_etl(days_back: int = config.ETL_DAYS_BACK, source: str = "ftp") -> dict:
                 db.session.add(log)
                 new_hist = 0
                 for r in records:
+                    # Гарантируем наличие родительской записи в satellite_meta (для Foreign Key)
+                    meta = db.session.get(SatelliteMeta, r['sat_id'])
+                    if not meta:
+                        sys_guess = "GPS" if r['sat_id'].startswith('G') else "GLONASS" if r['sat_id'].startswith('R') else "Other"
+                        db.session.add(SatelliteMeta(sat_id=r['sat_id'], system=sys_guess))
+                        db.session.flush()
+
                     exists = SatelliteStatusHistory.query.filter_by(
                         sat_id=r['sat_id'], start_epoch=r['start_epoch'], end_epoch=r['end_epoch']
                     ).first()
@@ -194,12 +212,19 @@ def run_etl(days_back: int = config.ETL_DAYS_BACK, source: str = "ftp") -> dict:
         processed_sats_str = ",".join(unique_sats)
 
         file_key = f"{subdir}/{fname}"
-        product_type = subdir  # "ultra", "rapid" или "final"
+        product_type = subdir
         for r in records:
             r["source"] = record_source
             r["product_type"] = product_type
 
         with app.app_context():
+            # Также создаем заглушки метаданных для часовых данных, если спутник новый
+            for s_id in unique_sats:
+                if not db.session.get(SatelliteMeta, s_id):
+                    sys_guess = "GPS" if s_id.startswith('G') else "GLONASS" if s_id.startswith('R') else "Other"
+                    db.session.add(SatelliteMeta(sat_id=s_id, system=sys_guess))
+            db.session.commit()
+
             log = EtlLog(ftp_file=file_key, records_raw=len(records), processed_sats=processed_sats_str)
             db.session.add(log)
             db.session.commit()
