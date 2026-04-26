@@ -49,6 +49,15 @@ def _get_app():
                     db.session.commit()
                 except Exception:
                     db.session.rollback()
+        
+        if "etl_log" in inspector.get_table_names():
+            cols = [c["name"] for c in inspector.get_columns("etl_log")]
+            if "processed_sats" not in cols:
+                try:
+                    db.session.execute(db.text("ALTER TABLE etl_log ADD COLUMN processed_sats TEXT"))
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
     return app
 
 
@@ -115,9 +124,65 @@ def run_etl(days_back: int = config.ETL_DAYS_BACK, source: str = "ftp") -> dict:
         record_source = "ftp"
 
     for fname, text, subdir in file_iterator:
+        file_key = f"{subdir}/{fname}"
+        
+        if fname.lower().endswith(".glo"):
+            from .status_parsers import parse_glo
+            from .models import SatelliteMeta, db
+            records = parse_glo(text)
+            stats["files_processed"] += 1
+            unique_sats = sorted(list(set(r["sat_id"] for r in records)))
+            processed_sats_str = ",".join(unique_sats)
+            
+            with app.app_context():
+                log = EtlLog(ftp_file=file_key, records_raw=len(records), processed_sats=processed_sats_str)
+                db.session.add(log)
+                for r in records:
+                    meta = SatelliteMeta.query.get(r['sat_id'])
+                    if not meta:
+                        db.session.add(SatelliteMeta(**r))
+                    else:
+                        for k, v in r.items():
+                            setattr(meta, k, v)
+                log.status = "ok"
+                log.finished_at = _utcnow()
+                db.session.commit()
+            logger.info(f"Loaded .glo meta for {len(records)} satellites")
+            continue
+            
+        elif fname.lower().endswith(".hlt"):
+            from .status_parsers import parse_hlt
+            from .models import SatelliteStatusHistory, db
+            records = parse_hlt(text)
+            stats["files_processed"] += 1
+            unique_sats = sorted(list(set(r["sat_id"] for r in records)))
+            processed_sats_str = ",".join(unique_sats)
+
+            with app.app_context():
+                log = EtlLog(ftp_file=file_key, records_raw=len(records), processed_sats=processed_sats_str)
+                db.session.add(log)
+                new_hist = 0
+                for r in records:
+                    exists = SatelliteStatusHistory.query.filter_by(
+                        sat_id=r['sat_id'], start_epoch=r['start_epoch'], end_epoch=r['end_epoch']
+                    ).first()
+                    if not exists:
+                        db.session.add(SatelliteStatusHistory(**r))
+                        new_hist += 1
+                log.records_new = new_hist
+                log.status = "ok"
+                log.finished_at = _utcnow()
+                db.session.commit()
+            logger.info(f"Loaded {new_hist} .hlt records")
+            continue
+
+        # Standard processing (CLK, SP3)
         records = parse_file(text, fname)
         stats["files_processed"] += 1
         stats["records_raw"] += len(records)
+
+        unique_sats = sorted(list(set(r["sat_id"] for r in records)))
+        processed_sats_str = ",".join(unique_sats)
 
         file_key = f"{subdir}/{fname}"
         product_type = subdir  # "ultra", "rapid" или "final"
@@ -126,7 +191,7 @@ def run_etl(days_back: int = config.ETL_DAYS_BACK, source: str = "ftp") -> dict:
             r["product_type"] = product_type
 
         with app.app_context():
-            log = EtlLog(ftp_file=file_key, records_raw=len(records))
+            log = EtlLog(ftp_file=file_key, records_raw=len(records), processed_sats=processed_sats_str)
             db.session.add(log)
             db.session.commit()
             try:

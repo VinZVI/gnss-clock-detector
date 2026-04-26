@@ -48,21 +48,30 @@ def _list_dir(ftp: ftplib.FTP, path: str) -> list[str]:
     return names
 
 
-def _download(ftp: ftplib.FTP, name: str) -> Optional[bytes]:
+def _download(ftp: ftplib.FTP, path: str, name: str) -> Optional[bytes]:
     buf = io.BytesIO()
     try:
-        ftp.retrbinary(f"RETR {name}", buf.write)
+        ftp.retrbinary(f"RETR {path}/{name}", buf.write)
         raw = buf.getvalue()
         logger.info("  ↓ %s  (%s байт)", name, f"{len(raw):,}")
         return raw
     except ftplib.all_errors as exc:
-        logger.error("  RETR %s: %s", name, exc)
+        logger.error("  RETR %s/%s: %s", path, name, exc)
         return None
 
 
 # ---------------------------------------------------------------------------
 # Кандидаты по приоритету для одного слота
 # ---------------------------------------------------------------------------
+
+
+def _candidates_status(dt) -> List[Tuple[str, Optional[str]]]:
+    yy = dt.year % 100
+    stem = f"{yy:02d}{dt.month:02d}{dt.day:02d}"
+    return [
+        (f"Const_{stem}.glo", None),
+        (f"Stark_{stem}.hlt", None)
+    ]
 
 def _candidates(dt, slot_h: int) -> List[Tuple[str, Optional[str]]]:
     """
@@ -139,9 +148,38 @@ def iter_new_files(
             # Кэш листингов: path -> list[str]
             _dir_cache: dict[str, list[str]] = {}
 
+            # Кэш для статусов (проверяем один раз за день)
+            _checked_status_dates = set()
+
             for dt, slot_h in slots:
                 dir_tag = date_to_dir(dt)
                 
+                # 1. Проверяем статусные файлы для этого дня
+                if dir_tag not in _checked_status_dates:
+                    _checked_status_dates.add(dir_tag)
+                    
+                    # Статусы лежат в /MCC/STATUS/YYYY/
+                    ftp_path_status = f"/MCC/STATUS/{dt.year}"
+                    if ftp_path_status not in _dir_cache:
+                        _dir_cache[ftp_path_status] = _list_dir(ftp, ftp_path_status)
+                        if _dir_cache[ftp_path_status]:
+                            logger.info("FTP ls %s → %d файлов", ftp_path_status, len(_dir_cache[ftp_path_status]))
+                            
+                    if _dir_cache[ftp_path_status]:
+                        server_set_status = set(_dir_cache[ftp_path_status])
+                        for fname, compression in _candidates_status(dt):
+                            key = f"status/{fname}"
+                            if key not in already_loaded and fname in server_set_status:
+                                raw = _download(ftp, ftp_path_status, fname)
+                                if raw:
+                                    if fname.lower().endswith(".glo"):
+                                        text = raw.decode('cp1251', errors='replace')
+                                    else:
+                                        text = raw.decode('ascii', errors='replace')
+                                    yield fname, text, "status"
+                                    already_loaded.add(key)
+                
+                # 2. Ищем основные файлы
                 for subdir in SUBDIRS:
                     
                     ftp_path = f"{config.FTP_BASE}/{dir_tag}/{subdir}"
@@ -161,7 +199,7 @@ def iter_new_files(
                     for p in ["Sta", "IPG", "IAU", "IAC"]:
                         current_candidates.extend(_candidates_daily(dt, p))
 
-                    # 2. 6-часовые слоты (теперь ищем везде, не только в ultra)
+                    # 2. 6-часовые слоты (ищем везде)
                     current_candidates.extend(_candidates(dt, slot_h))
 
                     # 3. Высокоточные 30с (только в final)
@@ -170,25 +208,29 @@ def iter_new_files(
                         week, dow = utc_to_gps_week(dt)
                         current_candidates.append((f"Sta30s{week:04d}{dow}.clk", None))
 
+                    # Ищем основной файл (берем первый найденный)
+                    found_main = False
                     for fname, compression in current_candidates:
+                        if fname.lower().endswith((".glo", ".hlt")):
+                            continue
+
                         key = f"{subdir}/{fname}"
                         if key in already_loaded:
-                            logger.debug("  пропуск (уже загружен): %s", key)
+                            found_main = True # Уже скачали лучший файл для этого слота/дня
                             break
 
-                        if fname not in server_set:
-                            continue
+                        if fname in server_set:
+                            raw = _download(ftp, ftp_path, fname)
+                            if raw:
+                                text = _decompress(raw, fname)
+                                if text:
+                                    yield fname, text, subdir
+                                    already_loaded.add(key)
+                                    found_main = True
+                                    break
 
-                        raw = _download(ftp, fname)
-                        if raw is None:
-                            continue
-
-                        text = _decompress(raw, fname)
-                        if text is None:
-                            continue
-
-                        yield fname, text, subdir
-                        break
+                    if found_main:
+                        break # Переходим к следующему слоту, т.к. основные данные уже взяли
 
     except ftplib.all_errors as exc:
         logger.error("FTP ошибка: %s", exc)

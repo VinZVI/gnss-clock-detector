@@ -16,7 +16,7 @@ def test_run_etl_success(mock_loaded, mock_purge, mock_load, mock_parse, mock_it
 
     # Имитируем один файл в FTP (filename, content, subdir)
     mock_iter.return_value = [("test.clk", "file content", "rapid")]
-    mock_parse.return_value = [{"satellite": "G01", "clock": 0.0001}]
+    mock_parse.return_value = [{"sat_id": "G01", "clock": 0.0001}]
     mock_load.return_value = 1
 
     # Мокаем контекст приложения Flask и БД

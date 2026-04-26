@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>КА — GNSS Clock Detector</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; color: #e6edf3; min-height: 100vh; }
+
+    header { background: linear-gradient(135deg, #1a2332, #0d2137); border-bottom: 1px solid #21262d; padding: 16px 32px; display: flex; align-items: center; gap: 16px; }
+    .back-btn { padding: 6px 14px; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #8b949e; font-size: .82rem; cursor: pointer; text-decoration: none; transition: all .15s; }
+    .back-btn:hover { border-color: #58a6ff; color: #58a6ff; }
+    .header-title { flex: 1; }
+    .header-title h1 { font-size: 1.2rem; font-weight: 700; color: #58a6ff; }
+    .header-title p  { font-size: .75rem; color: #8b949e; margin-top: 3px; }
+    .gnss-badge { padding: 4px 12px; border-radius: 20px; font-size: .78rem; font-weight: 600; }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+    .card { background: #161b22; border: 1px solid #21262d; border-radius: 10px; margin-bottom: 20px; }
+    .card-header { padding: 14px 18px; border-bottom: 1px solid #21262d; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+    .card-header h2 { font-size: .88rem; color: #8b949e; }
+    .card-body { padding: 18px; }
+
+    /* Метаданные */
+    .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+    .meta-item { background: #0d1117; border: 1px solid #21262d; border-radius: 8px; padding: 12px 14px; }
+    .meta-label { font-size: .68rem; color: #484f58; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px; }
+    .meta-value { font-size: .95rem; font-weight: 600; color: #e6edf3; }
+    .meta-value.empty { color: #484f58; font-weight: 400; font-style: italic; }
+
+    /* Аналитика */
+    .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field label { font-size: .7rem; color: #8b949e; text-transform: uppercase; letter-spacing: .04em; }
+    .field select, .field input {
+      background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+      color: #e6edf3; padding: 7px 10px; font-size: .86rem; outline: none;
+    }
+    .field select:focus, .field input:focus { border-color: #58a6ff; }
+    .field input[type=number] { width: 80px; }
+    .field input[type=date]   { min-width: 140px; }
+    .btn { padding: 7px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: .86rem; font-weight: 500; }
+    .btn-primary { background: #238636; color: #fff; }
+    .btn-primary:hover { background: #2ea043; }
+
+    .analytics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-top: 16px; }
+    .stat-card { background: #0d1117; border: 1px solid #21262d; border-radius: 8px; padding: 14px 16px; text-align: center; }
+    .stat-label { font-size: .68rem; color: #8b949e; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+    .stat-value { font-size: 1.5rem; font-weight: 700; color: #58a6ff; }
+    .stat-unit  { font-size: .65rem; color: #484f58; margin-left: 3px; }
+    .health-good    { color: #56d364 !important; }
+    .health-warning { color: #d29922 !important; }
+    .health-bad     { color: #f85149 !important; }
+
+    /* График */
+    .chart-toolbar { display: flex; gap: 6px; }
+    .btn-ghost { padding: 5px 12px; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #8b949e; font-size: .78rem; cursor: pointer; }
+    .btn-ghost:hover { border-color: #58a6ff; color: #58a6ff; }
+    .chart-wrap { position: relative; height: 340px; }
+    .chart-hint { font-size: .7rem; color: #484f58; text-align: center; margin-top: 8px; }
+
+    /* Таблицы */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: .83rem; }
+    th { background: #0d1117; color: #8b949e; font-weight: 500; text-align: left; padding: 9px 12px; border-bottom: 1px solid #21262d; font-size: .72rem; text-transform: uppercase; }
+    td { padding: 8px 12px; border-bottom: 1px solid #161b22; }
+    tr:hover td { background: #1c2128; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: .72rem; font-weight: 600; }
+    .badge-ok      { background: #1a3a2a; color: #56d364; }
+    .badge-anomaly { background: #3d1c1c; color: #f85149; }
+    .badge-warn    { background: #2d2200; color: #d29922; }
+
+    .status-healthy { color: #56d364; }
+    .status-unhealthy { color: #f85149; }
+    .status-unknown { color: #8b949e; }
+
+    #pageStatus { padding: 9px 14px; border-radius: 7px; margin-bottom: 16px; font-size: .83rem; display: none; }
+    #pageStatus.info  { background: #132030; color: #58a6ff; display: block; }
+    #pageStatus.error { background: #2d1117; color: #f85149; display: block; }
+    #pageStatus.ok    { background: #0d2a17; color: #56d364; display: block; }
+
+    .empty { text-align: center; color: #484f58; padding: 28px; font-size: .86rem; }
+
+    /* Цвета бейджа по ГНС */
+    .badge-G { background: #1a2a45; color: #58a6ff; border: 1px solid #1f6feb; }
+    .badge-R { background: #2d1117; color: #f85149; border: 1px solid #f85149; }
+    .badge-E { background: #0d2a17; color: #56d364; border: 1px solid #3fb950; }
+    .badge-C { background: #2a1f00; color: #d29922; border: 1px solid #d29922; }
+    .badge-J { background: #1e1133; color: #a371f7; border: 1px solid #a371f7; }
+  </style>
+</head>
+<body>
+
+<header>
+  <a class="back-btn" href="/">← Дашборд</a>
+  <div class="header-title">
+    <h1 id="headerSatId">—</h1>
+    <p id="headerSubtitle">Загрузка…</p>
+  </div>
+  <span class="gnss-badge" id="gnssBadge"></span>
+</header>
+
+<div class="container">
+  <div id="pageStatus"></div>
+
+  <!-- Метаданные КА -->
+  <div class="card">
+    <div class="card-header"><h2>Метаданные КА</h2></div>
+    <div class="card-body">
+      <div class="meta-grid" id="metaGrid">
+        <div class="empty">Загрузка метаданных…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Управление периодом + аналитика -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Аналитика стабильности</h2>
+      <div class="controls">
+        <div class="field">
+          <label>Тип данных</label>
+          <select id="productType">
+            <option value="final">Final</option>
+            <option value="rapid" selected>Rapid</option>
+            <option value="ultra">Ultra-Rapid</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>От</label>
+          <input type="date" id="dateFrom" />
+        </div>
+        <div class="field">
+          <label>До</label>
+          <input type="date" id="dateTo" />
+        </div>
+        <div class="field">
+          <label>Порог (k)</label>
+          <input type="number" id="madThreshold" value="3.5" step="0.5" min="1" max="10" />
+        </div>
+        <div class="field">
+          <label>Окно</label>
+          <input type="number" id="windowSize" value="15" min="3" max="99" step="2" />
+        </div>
+        <button class="btn btn-primary" onclick="loadClockData()">Обновить</button>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="analytics-grid" id="analyticsGrid">
+        <div class="stat-card"><div class="stat-label">Средний дрейф</div><div class="stat-value" id="valDrift">—</div><span class="stat-unit">нс/с</span></div>
+        <div class="stat-card"><div class="stat-label">Макс. скачок</div><div class="stat-value" id="valJump">—</div><span class="stat-unit">нс</span></div>
+        <div class="stat-card"><div class="stat-label">Шум (RMS)</div><div class="stat-value" id="valRMS">—</div><span class="stat-unit">нс</span></div>
+        <div class="stat-card"><div class="stat-label">Индекс здоровья</div><div><span class="stat-value" id="valHealth">—</span><span class="stat-unit">%</span></div></div>
+        <div class="stat-card"><div class="stat-label">Точек</div><div class="stat-value" id="valTotal">—</div></div>
+        <div class="stat-card"><div class="stat-label">Аномалий</div><div class="stat-value health-bad" id="valAnom">—</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- График -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Временной ряд clock bias</h2>
+      <div class="chart-toolbar">
+        <button class="btn-ghost" onclick="resetZoom()">⟳ Сброс</button>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="chart-wrap"><canvas id="chart"></canvas></div>
+      <div class="chart-hint">Колёсико — zoom &nbsp;|&nbsp; Перетаскивание — pan</div>
+    </div>
+  </div>
+
+  <!-- Аномальные точки -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Аномальные точки <span id="anomBadge" style="font-size:.75rem;color:#484f58"></span></h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Эпоха (UTC)</th>
+          <th>Clock Bias (нс)</th>
+          <th>Score</th>
+          <th>Лок. медиана</th>
+          <th>Лок. MAD</th>
+        </tr></thead>
+        <tbody id="anomalyTable"><tr><td colspan="5" class="empty">Выберите период и нажмите «Обновить»</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- История статусов -->
+  <div class="card">
+    <div class="card-header"><h2>Официальная история состояний</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Начало</th>
+          <th>Конец</th>
+          <th>Статус</th>
+          <th>Код</th>
+        </tr></thead>
+        <tbody id="historyTable"><tr><td colspan="4" class="empty">Загрузка…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const GNSS_NAMES = { G: 'GPS', R: 'GLONASS', E: 'Galileo', C: 'BeiDou', J: 'QZSS', S: 'SBAS', I: 'NavIC' };
+const STATUS_LABELS = { 0: 'Здоров', 1: 'Не здоров', 3: 'Тех. обслуживание' };
+
+let chart = null;
+const satId = location.pathname.split('/').filter(x => x).pop();
+
+(function init() {
+  document.title = `${satId} — GNSS Clock Detector`;
+  document.getElementById('headerSatId').textContent = satId;
+
+  const sys = GNSS_NAMES[satId[0]] || satId[0];
+  const badge = document.getElementById('gnssBadge');
+  badge.textContent = sys;
+  badge.className = `gnss-badge badge-${satId[0]}`;
+
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const fmt = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}`;
+  document.getElementById('dateFrom').value = fmt(new Date(now - 7*86400e3));
+  document.getElementById('dateTo').value   = fmt(now);
+
+  loadMeta();
+  loadHistory();
+  loadClockData();
+
+  ['productType','madThreshold','windowSize'].forEach(id =>
+    document.getElementById(id).addEventListener('change', loadClockData)
+  );
+})();
+
+function setStatus(msg, type) {
+  const el = document.getElementById('pageStatus');
+  el.textContent = msg;
+  el.className = type;
+}
+
+// ── Метаданные ───────────────────────────────────────────────────────────────
+async function loadMeta() {
+  try {
+    const res = await fetch(`/api/satellites/${satId}/meta`);
+    const grid = document.getElementById('metaGrid');
+
+    if (!res.ok) {
+      grid.innerHTML = '<div class="empty">Метаданные недоступны (.glo файлы не загружены)</div>';
+      document.getElementById('headerSubtitle').textContent = GNSS_NAMES[satId[0]] || '';
+      return;
+    }
+
+    const m = await res.json();
+    document.getElementById('headerSubtitle').textContent =
+      [m.system, m.sat_type].filter(Boolean).join(' · ');
+
+    const fields = [
+      ['Система',          m.system],
+      ['Тип КА',           m.sat_type],
+      ['Плоскость',        m.plane != null ? `Плоскость ${m.plane}` : null],
+      ['Слот',             m.slot  != null ? `Слот ${m.slot}`       : null],
+      ['Дата запуска',     m.launch_date],
+      ['Ввод в систему',   m.in_service_date],
+      ['Дата комиссии',    m.commission_date],
+    ];
+
+    grid.innerHTML = fields.map(([label, val]) => `
+      <div class="meta-item">
+        <div class="meta-label">${label}</div>
+        <div class="meta-value ${val ? '' : 'empty'}">${val || 'нет данных'}</div>
+      </div>`).join('');
+  } catch(e) {
+    document.getElementById('metaGrid').innerHTML = '<div class="empty">Ошибка загрузки метаданных</div>';
+  }
+}
+
+// ── Clock bias + аналитика ───────────────────────────────────────────────────
+async function loadClockData() {
+  const from        = document.getElementById('dateFrom').value;
+  const to          = document.getElementById('dateTo').value;
+  const threshold   = parseFloat(document.getElementById('madThreshold').value) || 3.5;
+  const windowSize  = parseInt(document.getElementById('windowSize').value, 10) || 15;
+  const productType = document.getElementById('productType').value;
+
+  if (!from || !to) { setStatus('Укажите период', 'error'); return; }
+
+  setStatus(`Загрузка ${satId} [${productType.toUpperCase()}]…`, 'info');
+
+  try {
+    const url = `/api/data/${satId}?from=${from}&to=${to}&threshold=${threshold}&window_size=${windowSize}&type=${productType}`;
+    const res  = await fetch(url);
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.error || 'Ошибка API');
+
+    const points   = data.data || [];
+    const anomalies = points.filter(p => p.is_outlier);
+
+    // Метрики
+    document.getElementById('valTotal').textContent = points.length;
+    document.getElementById('valAnom').textContent  = anomalies.length;
+
+    if (data.analytics) {
+      const a = data.analytics;
+      document.getElementById('valDrift').textContent = a.avg_drift;
+      document.getElementById('valJump').textContent  = a.max_jump;
+      document.getElementById('valRMS').textContent   = a.noise_rms;
+
+      const h = Math.round((a.health_idx ?? a.health_index ?? 0) * 100);
+      const hEl = document.getElementById('valHealth');
+      hEl.textContent = h;
+      hEl.className = 'stat-value ' + (h > 98 ? 'health-good' : h > 90 ? 'health-warning' : 'health-bad');
+    }
+
+    renderChart(points);
+    renderAnomalyTable(anomalies);
+    setStatus(`${satId}: ${points.length} точек [${productType.toUpperCase()}]`, 'ok');
+  } catch(e) {
+    setStatus('Ошибка: ' + e.message, 'error');
+    if (chart) { chart.destroy(); chart = null; }
+    document.getElementById('anomalyTable').innerHTML =
+      `<tr><td colspan="5" class="empty">${e.message}</td></tr>`;
+  }
+}
+
+function renderChart(ts) {
+  const ctx = document.getElementById('chart').getContext('2d');
+  if (chart) { chart.destroy(); chart = null; }
+
+  chart = new Chart(ctx, {
+    type: 'scatter',
+    data: {
+      datasets: [
+        {
+          label: 'Норма',
+          data: ts.filter(p => !p.is_outlier).map(p => ({ x: new Date(p.epoch), y: p.clock_bias })),
+          backgroundColor: '#1f6feb', radius: 2,
+        },
+        {
+          label: 'Аномалия',
+          data: ts.filter(p => p.is_outlier).map(p => ({ x: new Date(p.epoch), y: p.clock_bias })),
+          backgroundColor: '#f85149', radius: 5,
+        },
+        {
+          label: 'Лок. медиана',
+          data: ts.map(p => ({ x: new Date(p.epoch), y: p.median })),
+          borderColor: 'rgba(255,206,86,0.5)', borderWidth: 1,
+          pointRadius: 0, showLine: true, type: 'line', tension: 0.4,
+        },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: {
+        legend: { labels: { color: '#8b949e' } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const p = ts[ctx.dataIndex];
+              if (!p) return '';
+              return [
+                ` bias: ${(p.clock_bias||0).toFixed(3)} нс`,
+                ` score: ${p.score||0}`,
+                ` ${p.is_outlier ? '⚠ АНОМАЛИЯ' : '✓ норма'}`,
+              ];
+            }
+          }
+        },
+        zoom: {
+          pan: { enabled: true, mode: 'xy' },
+          zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'xy' },
+        },
+      },
+      scales: {
+        x: {
+          type: 'time',
+          time: { tooltipFormat: 'yyyy-MM-dd HH:mm:ss', displayFormats: { hour: 'HH:mm', day: 'dd MMM' } },
+          ticks: { color: '#484f58' }, grid: { color: '#21262d' },
+        },
+        y: {
+          ticks: { color: '#484f58' }, grid: { color: '#21262d' },
+          title: { display: true, text: 'Clock Bias (ns)', color: '#8b949e' },
+        },
+      },
+    },
+  });
+}
+
+function renderAnomalyTable(anom) {
+  const badge = document.getElementById('anomBadge');
+  badge.textContent = anom.length ? `(${anom.length} шт.)` : '';
+
+  document.getElementById('anomalyTable').innerHTML = anom.length
+    ? anom.map(p => `
+        <tr>
+          <td>${p.epoch ? new Date(p.epoch).toISOString().replace('T',' ').slice(0,19) : ''}</td>
+          <td>${(p.clock_bias||0).toFixed(3)}</td>
+          <td><span class="badge badge-anomaly">${p.score||0}</span></td>
+          <td>${(p.median||0).toFixed(3)}</td>
+          <td>${(p.mad||0).toFixed(3)}</td>
+        </tr>`).join('')
+    : '<tr><td colspan="5" class="empty">Аномалий не обнаружено</td></tr>';
+}
+
+function resetZoom() { chart?.resetZoom(); }
+
+// ── История статусов ─────────────────────────────────────────────────────────
+async function loadHistory() {
+  try {
+    const res  = await fetch(`/api/satellites/${satId}/history`);
+    const data = await res.json();
+    const tbody = document.getElementById('historyTable');
+
+    if (!res.ok || !data.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="empty">История статусов недоступна (.hlt файлы не загружены)</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.map(h => {
+      const code  = h.status_code;
+      const label = STATUS_LABELS[code] ?? `Код ${code}`;
+      const cls   = code === 0 ? 'status-healthy' : code === 1 ? 'status-unhealthy' : 'status-unknown';
+      const start = h.start_epoch ? h.start_epoch.replace('T', ' ').slice(0, 19) : '—';
+      const end   = h.end_epoch   ? h.end_epoch.replace('T', ' ').slice(0, 19)   : '—';
+      return `<tr>
+        <td>${start}</td>
+        <td>${end}</td>
+        <td class="${cls}">${label}</td>
+        <td><span class="badge ${code === 0 ? 'badge-ok' : 'badge-anomaly'}">${code}</span></td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    document.getElementById('historyTable').innerHTML =
+      '<tr><td colspan="4" class="empty">Ошибка загрузки истории</td></tr>';
+  }
+}
+</script>
+</body>
+</html>

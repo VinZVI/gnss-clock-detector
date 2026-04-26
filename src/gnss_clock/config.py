@@ -42,7 +42,10 @@ if DB_TYPE == "postgresql":
         DATABASE_URI = DATABASE_URL
 else:
     # SQLite (по умолчанию)
-    DB_PATH = Path(os.environ.get("GNSS_DB_PATH", BASE_DIR / "db.sqlite3"))
+    db_path_str = os.environ.get("GNSS_DB_PATH", "src/instance/db.sqlite3")
+    DB_PATH = Path(db_path_str)
+    if not DB_PATH.is_absolute():
+        DB_PATH = (BASE_DIR / DB_PATH).resolve()
     DATABASE_URI = f"sqlite:///{DB_PATH}"
 
 # Engine options для лучшей производительности

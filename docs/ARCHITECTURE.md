@@ -31,17 +31,20 @@ GLONASS-IAC FTP          NASA CDDIS HTTPS
       ↓                        ↓
   ftp_client.py          nasa_client.py
       ↓                        ↓
-      └─────────┬──────────────┘
-                ↓
-           parsers.py         (bytes → list[dict])
-                ↓
-            etl.py            (запись в SatClock, дедупликация)
-                ↓
-           detector.py        (MAD → SatClockAnomaly)
-                ↓
-            app.py            (REST API)
-                ↓
-          index.html          (Chart.js dashboard)
+      ├────────────────────────┤
+      ↓                        ↓
+  parsers.py            status_parsers.py
+ (bytes → dict)         (.glo, .hlt → dict)
+      ↓                        ↓
+      └───────────┬────────────┘
+                  ↓
+               etl.py            (запись в SatClock, SatelliteMeta, EtlLog)
+                  ↓
+             detector.py         (MAD → SatClockAnomaly)
+                  ↓
+               app.py            (REST API)
+                  ↓
+          index / satellite.html  (Chart.js dashboard)
 ```
 
 ## Проверка зависимостей
