@@ -58,6 +58,15 @@ def _get_app():
                     db.session.commit()
                 except Exception:
                     db.session.rollback()
+
+        if "satellite_meta" in inspector.get_table_names():
+            cols = [c["name"] for c in inspector.get_columns("satellite_meta")]
+            if "sat_num" not in cols:
+                try:
+                    db.session.execute(db.text("ALTER TABLE satellite_meta ADD COLUMN sat_num VARCHAR(10)"))
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
     return app
 
 

@@ -92,6 +92,14 @@ def create_app() -> Flask:
                     db.session.rollback()
                     logger.warning(f"Could not update index for sat_clock_anomaly: {e}")
 
+        # 4. SatelliteMeta migration
+        if "satellite_meta" in inspector.get_table_names():
+            cols = [c["name"] for c in inspector.get_columns("satellite_meta")]
+            if "sat_num" not in cols:
+                db.session.execute(db.text("ALTER TABLE satellite_meta ADD COLUMN sat_num VARCHAR(10)"))
+                db.session.commit()
+                logger.info("Added 'sat_num' column to satellite_meta.")
+
     _register_routes(app)
     return app
 

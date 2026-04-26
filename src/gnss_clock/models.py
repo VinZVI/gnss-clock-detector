@@ -21,12 +21,14 @@ class SatelliteMeta(db.Model):
     launch_date = db.Column(db.Date)      # дата запуска
     in_service_date = db.Column(db.Date)  # дата ввода в систему
     commission_date = db.Column(db.Date)  # дата (завершения ввода / начала летных испытаний)
+    sat_num = db.Column(db.String(10))    # номер аппарата (например, "760")
     updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
 
     def as_dict(self):
         return {
             "sat_id": self.sat_id,
             "sat_type": self.sat_type,
+            "sat_num": self.sat_num,
             "system": self.system,
             "plane": self.plane,
             "slot": self.slot,

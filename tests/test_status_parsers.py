@@ -8,9 +8,9 @@ from gnss_clock.status_parsers import parse_glo, parse_hlt
 # ── Образец .glo ──────────────────────────────────────────────────────────
 GLO_SAMPLE = """\
 # Комментарий
-R01  1  1  2  ГЛО-М  26.01.01  04.12.11  04.12.11  активен
-R09  9  2  3  ГЛО-К  26.01.01  14.03.14  14.03.14  активен
-G01  1  0  0  GPS-IIF 26.01.01  25.05.11  25.05.11  активен
+R01  1  730  2  ГЛО-М  26.01.01  04.12.11  04.12.11  активен
+R09  9  801  3  ГЛО-К  26.01.01  14.03.14  14.03.14  активен
+G01  1  000  0  GPS-IIF 26.01.01  25.05.11  25.05.11  активен
 BADLINE
 """
 
@@ -61,6 +61,10 @@ def test_glo_required_fields():
         assert "sat_id" in r
         assert "system" in r
         assert "slot" in r
+        assert "sat_num" in r
+    
+    r01 = next(r for r in results if r["sat_id"] == "R01")
+    assert r01["sat_num"] == "730"
 
 def test_glo_empty():
     assert parse_glo("") == []

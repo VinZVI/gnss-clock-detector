@@ -89,6 +89,7 @@ def parse_glo(content_str):
             results.append({
                 "sat_id": sat_id,
                 "slot": slot,
+                "sat_num": parts[2],
                 "sat_type": sat_type,
                 "launch_date": launch_date,
                 "commission_date": commission_date,

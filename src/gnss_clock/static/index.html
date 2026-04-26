@@ -413,6 +413,7 @@ async function showSatDetails(satId) {
     grid.innerHTML = `
         <div class="meta-item"><div class="meta-label">Система</div><div class="meta-value">${m.system || '—'}</div></div>
         <div class="meta-item"><div class="meta-label">Тип</div><div class="meta-value">${m.sat_type || '—'}</div></div>
+        <div class="meta-item"><div class="meta-label">Номер аппарата</div><div class="meta-value">${m.sat_num || '—'}</div></div>
         <div class="meta-item"><div class="meta-label">Слот / Плоскость</div><div class="meta-value">${m.slot || '—'} / ${m.plane || '—'}</div></div>
     `;
 
