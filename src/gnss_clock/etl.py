@@ -147,7 +147,7 @@ def run_etl(days_back: int = config.ETL_DAYS_BACK, source: str = "ftp") -> dict:
     for fname, text, subdir in all_new_files:
         file_key = f"{subdir}/{fname}"
         
-        if fname.lower().endswith(".glo"):
+        if any(fname.lower().endswith(ext) for ext in [".glo", ".gps", ".bds", ".gal", ".qzs"]):
             from .status_parsers import parse_glo
             records = parse_glo(text)
             stats["files_processed"] += 1

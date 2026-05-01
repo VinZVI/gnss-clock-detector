@@ -70,6 +70,10 @@ def _candidates_status(dt) -> List[Tuple[str, Optional[str]]]:
     stem = f"{yy:02d}{dt.month:02d}{dt.day:02d}"
     return [
         (f"Const_{stem}.glo", None),
+        (f"Const_{stem}.gps", None),
+        (f"Const_{stem}.bds", None),
+        (f"Const_{stem}.gal", None),
+        (f"Const_{stem}.qzs", None),
         (f"Stark_{stem}.hlt", None)
     ]
 

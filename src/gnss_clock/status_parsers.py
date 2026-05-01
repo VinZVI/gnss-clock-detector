@@ -88,6 +88,12 @@ def parse_glo(content_str):
             elif raw_id.startswith('J'):
                 system = "QZSS"
                 sat_id = f"J{slot:02d}" if slot is not None else raw_id
+            elif raw_id.startswith('I'):
+                system = "NavIC"
+                sat_id = f"I{slot:02d}" if slot is not None else raw_id
+            elif raw_id.startswith('S'):
+                system = "SBAS"
+                sat_id = f"S{slot:02d}" if slot is not None else raw_id
             else:
                 # Если просто число, по умолчанию GLONASS (специфика ГЛОНАСС-ИАЦ)
                 if slot is not None:
