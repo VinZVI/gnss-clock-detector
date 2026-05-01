@@ -103,6 +103,12 @@ def create_app() -> Flask:
                 db.session.execute(db.text("ALTER TABLE satellite_meta ADD COLUMN assessment_date DATE"))
                 db.session.commit()
                 logger.info("Added 'assessment_date' column to satellite_meta.")
+            if "orbit_a" not in cols:
+                db.session.execute(db.text("ALTER TABLE satellite_meta ADD COLUMN orbit_a FLOAT"))
+                db.session.execute(db.text("ALTER TABLE satellite_meta ADD COLUMN orbit_e FLOAT"))
+                db.session.execute(db.text("ALTER TABLE satellite_meta ADD COLUMN orbit_i FLOAT"))
+                db.session.commit()
+                logger.info("Added orbit columns to satellite_meta.")
 
     _register_routes(app)
     return app

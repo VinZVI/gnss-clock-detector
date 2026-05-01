@@ -135,12 +135,13 @@ def run_etl(days_back: int = config.ETL_DAYS_BACK, source: str = "ftp") -> dict:
     # Собираем все новые файлы в список для сортировки
     all_new_files = list(file_iterator)
     
-    # Сортировка: .glo (0) -> .hlt (1) -> остальные (.clk, .sp3) (2)
+    # Сортировка: .glo (0) -> .oe (1) -> .hlt (2) -> остальные (.clk, .sp3) (3)
     def file_priority(item):
         fname = item[0].lower()
-        if fname.endswith(".glo"): return 0
-        if fname.endswith(".hlt"): return 1
-        return 2
+        if any(fname.endswith(ext) for ext in [".glo", ".gps", ".bds", ".gal", ".qzs"]): return 0
+        if fname.endswith(".oe"): return 1
+        if fname.endswith(".hlt"): return 2
+        return 3
     
     all_new_files.sort(key=file_priority)
 
@@ -162,14 +163,35 @@ def run_etl(days_back: int = config.ETL_DAYS_BACK, source: str = "ftp") -> dict:
                     if not meta:
                         db.session.add(SatelliteMeta(**r))
                     else:
+                        # Обновляем паспортные данные
                         for k, v in r.items():
                             setattr(meta, k, v)
                 log.status = "ok"
                 log.finished_at = _utcnow()
                 db.session.commit()
-            logger.info(f"Loaded .glo meta for {len(records)} satellites")
+            logger.info(f"Loaded meta passport for {len(records)} satellites")
             continue
             
+        elif fname.lower().endswith(".oe"):
+            from .status_parsers import parse_oe
+            records = parse_oe(text)
+            stats["files_processed"] += 1
+            
+            with app.app_context():
+                log = EtlLog(ftp_file=file_key, records_raw=len(records))
+                db.session.add(log)
+                for r in records:
+                    meta = db.session.get(SatelliteMeta, r['sat_id'])
+                    if meta:
+                        meta.orbit_a = r['orbit_a']
+                        meta.orbit_e = r['orbit_e']
+                        meta.orbit_i = r['orbit_i']
+                log.status = "ok"
+                log.finished_at = _utcnow()
+                db.session.commit()
+            logger.info(f"Updated orbital elements from {fname}")
+            continue
+
         elif fname.lower().endswith(".hlt"):
             from .status_parsers import parse_hlt
             from .models import SatelliteStatusHistory

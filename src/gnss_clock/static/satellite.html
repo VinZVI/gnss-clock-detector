@@ -280,6 +280,12 @@ async function loadMeta() {
       ['Дата запуска',     m.launch_date],
       ['Ввод в систему',   m.commission_date],
     ];
+    
+    if (m.orbit_a) {
+      fields.push(['Большая полуось', `${m.orbit_a.toFixed(2)} км`]);
+      fields.push(['Эксцентриситет',  m.orbit_e.toFixed(6)]);
+      fields.push(['Налонение',       `${m.orbit_i.toFixed(4)}°`]);
+    }
 
     grid.innerHTML = fields.map(([label, val]) => `
       <div class="meta-item">

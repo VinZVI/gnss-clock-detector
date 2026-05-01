@@ -74,7 +74,11 @@ def _candidates_status(dt) -> List[Tuple[str, Optional[str]]]:
         (f"Const_{stem}.bds", None),
         (f"Const_{stem}.gal", None),
         (f"Const_{stem}.qzs", None),
-        (f"Stark_{stem}.hlt", None)
+        (f"Stark_{stem}.hlt", None),
+        (f"GLO_{stem}.oe", None),
+        (f"GPS_{stem}.oe", None),
+        (f"BDS_{stem}.oe", None),
+        (f"QZS_{stem}.oe", None)
     ]
 
 def _candidates(dt, slot_h: int) -> List[Tuple[str, Optional[str]]]:

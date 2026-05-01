@@ -23,6 +23,12 @@ class SatelliteMeta(db.Model):
     commission_date = db.Column(db.Date)  # дата (завершения ввода / начала летных испытаний)
     assessment_date = db.Column(db.Date)  # дата оценки
     sat_num = db.Column(db.String(10))    # номер аппарата (например, "760")
+    
+    # Орбитальные элементы (последние известные)
+    orbit_a = db.Column(db.Float)  # Большая полуось, км
+    orbit_e = db.Column(db.Float)  # Эксцентриситет
+    orbit_i = db.Column(db.Float)  # Наклонение, град
+    
     updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
 
     def as_dict(self):
@@ -37,6 +43,9 @@ class SatelliteMeta(db.Model):
             "in_service_date": self.in_service_date.isoformat() if self.in_service_date else None,
             "commission_date": self.commission_date.isoformat() if self.commission_date else None,
             "assessment_date": self.assessment_date.isoformat() if self.assessment_date else None,
+            "orbit_a": self.orbit_a,
+            "orbit_e": self.orbit_e,
+            "orbit_i": self.orbit_i,
         }
 
 
