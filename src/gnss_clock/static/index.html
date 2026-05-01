@@ -150,6 +150,9 @@
       <div class="stat-card">
         <div class="label">Выбранный КА</div>
         <div class="value" id="statSat">—</div>
+        <div id="statMetaInfo" style="font-size: 0.72rem; color: #8b949e; margin-top: 4px; line-height: 1.4;">
+           <span id="statType"></span> <span id="statNum"></span>
+        </div>
         <button id="details-btn" class="btn btn-secondary btn-sm" onclick="goToSatelliteDetails()">Подробнее →</button>
       </div>
       <div class="stat-card"><div class="label">Точек</div><div class="value" id="statTotal">—</div></div>
@@ -438,6 +441,17 @@ async function loadData() {
     setStatus(`Загрузка ${_activeSat}...`, 'info');
     
     try {
+        // Fetch metadata in parallel
+        fetch(`/api/satellites/${_activeSat}/meta`).then(r => r.ok ? r.json() : null).then(m => {
+            if (m) {
+                document.getElementById('statType').textContent = m.sat_type || '';
+                document.getElementById('statNum').textContent = m.sat_num ? `(#${m.sat_num})` : '';
+            } else {
+                document.getElementById('statType').textContent = '';
+                document.getElementById('statNum').textContent = '';
+            }
+        });
+
         const res = await fetch(`/api/data/${_activeSat}?from=${from}&to=${to}&type=${productType}`);
         const data = await res.json();
         
