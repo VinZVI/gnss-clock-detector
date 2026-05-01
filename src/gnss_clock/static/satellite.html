@@ -276,9 +276,9 @@ async function loadMeta() {
       ['Номер аппарата',   m.sat_num],
       ['Плоскость',        m.plane != null ? `Плоскость ${m.plane}` : null],
       ['Слот',             m.slot  != null ? `Слот ${m.slot}`       : null],
+      ['Дата оценки',      m.assessment_date],
       ['Дата запуска',     m.launch_date],
-      ['Ввод в систему',   m.in_service_date],
-      ['Дата комиссии',    m.commission_date],
+      ['Ввод в систему',   m.commission_date],
     ];
 
     grid.innerHTML = fields.map(([label, val]) => `

@@ -99,6 +99,10 @@ def create_app() -> Flask:
                 db.session.execute(db.text("ALTER TABLE satellite_meta ADD COLUMN sat_num VARCHAR(10)"))
                 db.session.commit()
                 logger.info("Added 'sat_num' column to satellite_meta.")
+            if "assessment_date" not in cols:
+                db.session.execute(db.text("ALTER TABLE satellite_meta ADD COLUMN assessment_date DATE"))
+                db.session.commit()
+                logger.info("Added 'assessment_date' column to satellite_meta.")
 
     _register_routes(app)
     return app

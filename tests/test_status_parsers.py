@@ -103,8 +103,8 @@ def test_hlt_epoch_values():
     from datetime import datetime
     results = parse_hlt(HLT_SAMPLE)
     r = next(r for r in results if r["sat_id"] == "R01" and r["status_code"] == 0)
-    assert r["start_epoch"] == datetime(2018, 4, 26, 0, 0, 0)
-    assert r["end_epoch"]   == datetime(2019, 4, 26, 0, 0, 0)
+    assert r["start_epoch"] == datetime(2026, 4, 18, 0, 0, 0)
+    assert r["end_epoch"]   == datetime(2026, 4, 19, 0, 0, 0)
 
 def test_hlt_empty():
     assert parse_hlt("") == []

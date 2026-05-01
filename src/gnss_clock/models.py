@@ -21,6 +21,7 @@ class SatelliteMeta(db.Model):
     launch_date = db.Column(db.Date)      # дата запуска
     in_service_date = db.Column(db.Date)  # дата ввода в систему
     commission_date = db.Column(db.Date)  # дата (завершения ввода / начала летных испытаний)
+    assessment_date = db.Column(db.Date)  # дата оценки
     sat_num = db.Column(db.String(10))    # номер аппарата (например, "760")
     updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow)
 
@@ -35,6 +36,7 @@ class SatelliteMeta(db.Model):
             "launch_date": self.launch_date.isoformat() if self.launch_date else None,
             "in_service_date": self.in_service_date.isoformat() if self.in_service_date else None,
             "commission_date": self.commission_date.isoformat() if self.commission_date else None,
+            "assessment_date": self.assessment_date.isoformat() if self.assessment_date else None,
         }
 
 
