@@ -160,8 +160,17 @@
         <div class="stat-card"><div class="stat-label">Макс. скачок</div><div class="stat-value" id="valJump">—</div><span class="stat-unit">нс</span></div>
         <div class="stat-card"><div class="stat-label">Шум (RMS)</div><div class="stat-value" id="valRMS">—</div><span class="stat-unit">нс</span></div>
         <div class="stat-card"><div class="stat-label">Индекс здоровья</div><div><span class="stat-value" id="valHealth">—</span><span class="stat-unit">%</span></div></div>
-        <div class="stat-card"><div class="stat-label">Точек</div><div class="stat-value" id="valTotal">—</div></div>
-        <div class="stat-card"><div class="stat-label">Аномалий</div><div class="stat-value health-bad" id="valAnom">—</div></div>
+      </div>
+      
+      <div style="margin-top:24px; display:flex; gap:20px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:300px;">
+          <h3 style="font-size:.85rem; color:#8b949e; margin-bottom:12px; text-transform:uppercase">График стабильности (ADEV)</h3>
+          <div style="height:260px;"><canvas id="adevChart"></canvas></div>
+        </div>
+        <div style="flex:0 0 200px;">
+           <div class="stat-card" style="margin-bottom:10px;"><div class="stat-label">Точек</div><div class="stat-value" id="valTotal" style="font-size:1.2rem">—</div></div>
+           <div class="stat-card"><div class="stat-label">Аномалий</div><div class="stat-value health-bad" id="valAnom" style="font-size:1.2rem">—</div></div>
+        </div>
       </div>
     </div>
   </div>
@@ -372,14 +381,66 @@ async function loadClockData() {
 
     renderChart(points);
     renderAnomalyTable(anomalies);
+    renderAdevChart(data.analytics?.allan_variance);
     loadCorrelationData(from, to);
     setStatus(`${satId}: ${points.length} точек [${productType.toUpperCase()}]`, 'ok');
   } catch(e) {
     setStatus('Ошибка: ' + e.message, 'error');
     if (chart) { chart.destroy(); chart = null; }
+    if (adevChart) { adevChart.destroy(); adevChart = null; }
     document.getElementById('anomalyTable').innerHTML =
       `<tr><td colspan="5" class="empty">${e.message}</td></tr>`;
   }
+}
+
+// ── Allan Deviation ────────────────────────────────────────────────────────
+let adevChart = null;
+function renderAdevChart(adev) {
+  const ctx = document.getElementById('adevChart').getContext('2d');
+  if (adevChart) adevChart.destroy();
+  if (!adev || !adev.tau || !adev.tau.length) return;
+
+  adevChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: adev.tau,
+      datasets: [{
+        label: 'ADEV',
+        data: adev.tau.map((t, i) => ({ x: t, y: adev.adev[i] })),
+        borderColor: '#58a6ff',
+        borderWidth: 2,
+        pointRadius: 4,
+        backgroundColor: '#58a6ff',
+        tension: 0.1
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: {
+          type: 'logarithmic',
+          title: { display: true, text: 'Tau (s)', color: '#8b949e' },
+          grid: { color: '#21262d' },
+          ticks: { color: '#484f58', callback: v => v.toExponential() }
+        },
+        y: {
+          type: 'logarithmic',
+          title: { display: true, text: 'σy(τ)', color: '#8b949e' },
+          grid: { color: '#21262d' },
+          ticks: { color: '#484f58', callback: v => v.toExponential() }
+        }
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` τ=${ctx.raw.x}s, σy=${ctx.raw.y.toExponential(2)}`
+          }
+        }
+      }
+    }
+  });
 }
 
 // ── Корреляция с орбитой ───────────────────────────────────────────────────
