@@ -3,7 +3,7 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from gnss_clock.status_parsers import parse_glo, parse_hlt
+from gnss_clock.status_parsers import parse_glo, parse_hlt, parse_oe
 
 # ── Образец .glo ──────────────────────────────────────────────────────────
 GLO_SAMPLE = """\
@@ -108,3 +108,19 @@ def test_hlt_epoch_values():
 
 def test_hlt_empty():
     assert parse_hlt("") == []
+
+def test_parse_oe_basic():
+    sample = "G01 80 0 26/01/01 3600 26561.011 0.0012674 340.944567 54.908676 358.113413 157.930211"
+    results = parse_oe(sample)
+    assert len(results) == 1
+    r = results[0]
+    assert r["sat_id"] == "G01"
+    assert r["a"] == 26561.011
+    assert r["i"] == 54.908676
+    assert r["epoch"].hour == 1
+
+def test_parse_oe_skips_bad_lines():
+    sample = "BAD LINE\n# comment\nG01 80 0 26/01/01 0 26559.604 0.0013155 340.945886 54.907335 357.277480 127.907755"
+    results = parse_oe(sample)
+    assert len(results) == 1
+    assert results[0]["sat_id"] == "G01"
