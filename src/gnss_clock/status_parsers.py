@@ -134,6 +134,7 @@ def parse_oe(content_str):
     Формат строки: SatID Num Type Date Seconds a e Omega i omega M
     Пример: G01 80 0 26/01/01 0 26559.604 0.0013155 340.945886 54.907335 357.277480 127.907755
     """
+    from datetime import timedelta
     results = []
     for line in content_str.splitlines():
         line = line.strip()
@@ -143,16 +144,34 @@ def parse_oe(content_str):
         if len(parts) >= 11:
             try:
                 sat_id = parts[0]
-                # Извлекаем элементы: a (5), e (6), i (8)
+                # Дата YY/MM/DD
+                date_parts = parts[3].split('/')
+                if len(date_parts) == 3:
+                    yy, mm, dd = int(date_parts[0]), int(date_parts[1]), int(date_parts[2])
+                    year = 2000 + yy if yy <= 50 else 1900 + yy
+                    base_date = datetime(year, mm, dd)
+                    seconds = int(parts[4])
+                    epoch = base_date + timedelta(seconds=seconds)
+                else:
+                    continue
+
+                # Извлекаем элементы
                 a = float(parts[5])
                 e = float(parts[6])
+                omega_node = float(parts[7])
                 i = float(parts[8])
+                arg_perigee = float(parts[9])
+                mean_anomaly = float(parts[10])
                 
                 results.append({
                     "sat_id": sat_id,
-                    "orbit_a": a,
-                    "orbit_e": e,
-                    "orbit_i": i
+                    "epoch": epoch,
+                    "a": a,
+                    "e": e,
+                    "i": i,
+                    "omega_node": omega_node,
+                    "arg_perigee": arg_perigee,
+                    "mean_anomaly": mean_anomaly
                 })
             except (ValueError, IndexError):
                 continue

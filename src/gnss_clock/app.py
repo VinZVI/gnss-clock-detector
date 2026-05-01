@@ -27,7 +27,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from sqlalchemy import func, inspect as sa_inspect
 
 from . import config
-from .models import db, SatClock, EtlLog, SatelliteMeta, SatelliteStatusHistory, AnalyticsCache
+from .models import db, SatClock, EtlLog, SatelliteMeta, SatelliteStatusHistory, AnalyticsCache, SatelliteOrbitHistory
 from .detector import detect_outliers
 from .analytics import calculate_satellite_analytics
 
@@ -110,6 +110,11 @@ def create_app() -> Flask:
                 db.session.commit()
                 logger.info("Added orbit columns to satellite_meta.")
 
+        # 5. SatelliteOrbitHistory creation (if db.create_all missed it)
+        if "satellite_orbit_history" not in inspector.get_table_names():
+            db.create_all()
+            logger.info("Created satellite_orbit_history table.")
+
     _register_routes(app)
     return app
 
@@ -149,6 +154,55 @@ def _register_routes(app: Flask) -> None:
     def get_satellite_history(sat_id: str):
         history = SatelliteStatusHistory.query.filter_by(sat_id=sat_id).order_by(SatelliteStatusHistory.start_epoch.desc()).all()
         return jsonify([h.as_dict() for h in history])
+
+    @app.route("/api/correlation/<string:sat_id>")
+    def get_correlation_data(sat_id: str):
+        from .detector import detect_outliers
+        
+        # 1. Получаем все аномалии (используем rapid по умолчанию)
+        # На самом деле, лучше взять из SatClock и прогнать MAD прямо здесь для нужного периода
+        from_dt, to_dt = _parse_date_range(request.args)
+        if not from_dt:
+            from_dt = datetime.now() - timedelta(days=30)
+            to_dt = datetime.now()
+
+        records = SatClock.query.filter(
+            SatClock.sat_id == sat_id,
+            SatClock.product_type == 'rapid',
+            SatClock.epoch >= from_dt,
+            SatClock.epoch < to_dt,
+        ).order_by(SatClock.epoch).all()
+
+        if not records:
+            return jsonify({"error": "No data"}), 404
+
+        timeseries_raw = [{"epoch": r.epoch, "clock_bias": r.clock_bias} for r in records]
+        detection_results = detect_outliers(timeseries_raw)
+        anomalies = [r for r in detection_results if r.is_outlier]
+
+        # 2. Для каждой аномалии ищем ближайшее положение на орбите
+        correlation = []
+        for anom in anomalies:
+            # Ближайшая запись в пределах +/- 1 часа
+            orbit = SatelliteOrbitHistory.query.filter(
+                SatelliteOrbitHistory.sat_id == sat_id,
+                SatelliteOrbitHistory.epoch >= anom.epoch - timedelta(hours=1),
+                SatelliteOrbitHistory.epoch <= anom.epoch + timedelta(hours=1)
+            ).order_by(func.abs(func.julianday(SatelliteOrbitHistory.epoch) - func.julianday(anom.epoch))).first()
+
+            if orbit:
+                res = anom.__dict__.copy()
+                res.update({
+                    "orbit_epoch": orbit.epoch.isoformat(),
+                    "a": orbit.a,
+                    "e": orbit.e,
+                    "i": orbit.i,
+                    "mean_anomaly": orbit.mean_anomaly,
+                    "altitude": orbit.a - 6371.0
+                })
+                correlation.append(res)
+
+        return jsonify(correlation)
 
     @app.route("/api/satellites/<string:sat_id>/cache")
     def get_satellite_cache(sat_id: str):

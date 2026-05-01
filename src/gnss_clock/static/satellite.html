@@ -199,6 +199,30 @@
     </div>
   </div>
 
+  <!-- Корреляция с орбитой -->
+  <div class="card" id="orbitCorrCard" style="display:none">
+    <div class="card-header"><h2>Корреляция с орбитальной позицией</h2></div>
+    <div class="card-body">
+      <div style="display:flex; gap:20px; flex-wrap:wrap">
+        <div style="flex:1; min-width:300px; height:400px;">
+          <canvas id="orbitChart"></canvas>
+        </div>
+        <div style="flex:1; min-width:300px;">
+          <p style="font-size:.85rem; color:#8b949e; margin-bottom:15px">
+            График показывает распределение аномалий по средней аномалии (0-360°). 
+            Это позволяет выявить зависимость сбоев от положения спутника на орбите.
+          </p>
+          <div class="table-wrap">
+            <table id="corrTable">
+              <thead><tr><th>Эпоха</th><th>Высота (км)</th><th>Позиция (M)</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- История статусов -->
   <div class="card">
     <div class="card-header"><h2>Официальная история состояний</h2></div>
@@ -337,6 +361,7 @@ async function loadClockData() {
 
     renderChart(points);
     renderAnomalyTable(anomalies);
+    loadCorrelationData(from, to);
     setStatus(`${satId}: ${points.length} точек [${productType.toUpperCase()}]`, 'ok');
   } catch(e) {
     setStatus('Ошибка: ' + e.message, 'error');
@@ -344,6 +369,81 @@ async function loadClockData() {
     document.getElementById('anomalyTable').innerHTML =
       `<tr><td colspan="5" class="empty">${e.message}</td></tr>`;
   }
+}
+
+// ── Корреляция с орбитой ───────────────────────────────────────────────────
+let orbitChart = null;
+
+async function loadCorrelationData(from, to) {
+  try {
+    const res = await fetch(`/api/correlation/${satId}?from=${from}&to=${to}`);
+    const data = await res.json();
+    const card = document.getElementById('orbitCorrCard');
+
+    if (!res.ok || !data.length) {
+      card.style.display = 'none';
+      return;
+    }
+
+    card.style.display = 'block';
+    renderOrbitChart(data);
+    
+    document.getElementById('corrTable').querySelector('tbody').innerHTML = data.map(d => `
+      <tr>
+        <td>${d.epoch.replace('T',' ').slice(11,19)}</td>
+        <td>${d.altitude.toFixed(0)}</td>
+        <td>${d.mean_anomaly.toFixed(1)}°</td>
+      </tr>
+    `).join('');
+
+  } catch(e) {
+    console.error('Correlation error:', e);
+  }
+}
+
+function renderOrbitChart(data) {
+  const ctx = document.getElementById('orbitChart').getContext('2d');
+  if (orbitChart) orbitChart.destroy();
+
+  // Группируем аномалии по секторам 30 градусов
+  const sectors = new Array(12).fill(0);
+  data.forEach(d => {
+    const idx = Math.floor(d.mean_anomaly / 30) % 12;
+    sectors[idx]++;
+  });
+
+  orbitChart = new Chart(ctx, {
+    type: 'polarArea',
+    data: {
+      labels: ['0-30°','30-60°','60-90°','90-120°','120-150°','150-180°','180-210°','210-240°','240-270°','270-300°','300-330°','330-360°'],
+      datasets: [{
+        label: 'Кол-во аномалий',
+        data: sectors,
+        backgroundColor: 'rgba(248, 81, 73, 0.5)',
+        borderColor: '#f85149',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        r: {
+          grid: { color: '#21262d' },
+          angleLines: { color: '#21262d' },
+          ticks: { backdropColor: 'transparent', color: '#8b949e', stepSize: 1 }
+        }
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => `Сектор ${ctx.label}: ${ctx.raw} аномалий`
+          }
+        }
+      }
+    }
+  });
 }
 
 function renderChart(ts) {

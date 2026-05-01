@@ -174,6 +174,7 @@ def run_etl(days_back: int = config.ETL_DAYS_BACK, source: str = "ftp") -> dict:
             
         elif fname.lower().endswith(".oe"):
             from .status_parsers import parse_oe
+            from .models import SatelliteOrbitHistory
             records = parse_oe(text)
             stats["files_processed"] += 1
             
@@ -181,15 +182,24 @@ def run_etl(days_back: int = config.ETL_DAYS_BACK, source: str = "ftp") -> dict:
                 log = EtlLog(ftp_file=file_key, records_raw=len(records))
                 db.session.add(log)
                 for r in records:
+                    # Обновляем метаданные (последнее известное состояние)
                     meta = db.session.get(SatelliteMeta, r['sat_id'])
                     if meta:
-                        meta.orbit_a = r['orbit_a']
-                        meta.orbit_e = r['orbit_e']
-                        meta.orbit_i = r['orbit_i']
+                        meta.orbit_a = r['a']
+                        meta.orbit_e = r['e']
+                        meta.orbit_i = r['i']
+                    
+                    # Сохраняем в историю
+                    exists = SatelliteOrbitHistory.query.filter_by(
+                        sat_id=r['sat_id'], epoch=r['epoch']
+                    ).first()
+                    if not exists:
+                        db.session.add(SatelliteOrbitHistory(**r))
+                        
                 log.status = "ok"
                 log.finished_at = _utcnow()
                 db.session.commit()
-            logger.info(f"Updated orbital elements from {fname}")
+            logger.info(f"Updated orbital history from {fname}")
             continue
 
         elif fname.lower().endswith(".hlt"):

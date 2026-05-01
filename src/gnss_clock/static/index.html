@@ -79,6 +79,9 @@
     .gnss-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
     .gnss-G .gnss-dot { background: #1f6feb; }
     .gnss-R .gnss-dot { background: #f85149; }
+    .gnss-E .gnss-dot { background: #3fb950; }
+    .gnss-C .gnss-dot { background: #d29922; }
+    .gnss-J .gnss-dot { background: #a371f7; }
 
     .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
     .meta-item { background: #0d1117; border: 1px solid #21262d; border-radius: 8px; padding: 12px 14px; }
@@ -386,7 +389,8 @@ async function loadSatellites() {
     Object.keys(groups).sort().forEach(k => {
         const g = document.createElement('div');
         g.className = `gnss-group gnss-${k}`;
-        g.innerHTML = `<div class="gnss-group-label"><span class="gnss-dot"></span>${k === 'G' ? 'GPS' : 'GLONASS'}</div>`;
+        const groupInfo = GNSS_GROUPS[k] || { label: k, prefix: k };
+        g.innerHTML = `<div class="gnss-group-label"><span class="gnss-dot"></span>${groupInfo.label}</div>`;
         const chips = document.createElement('div');
         chips.className = 'sat-chips';
         groups[k].forEach(s => {

@@ -49,6 +49,40 @@ class SatelliteMeta(db.Model):
         }
 
 
+class SatelliteOrbitHistory(db.Model):
+    """Периодические орбитальные элементы для корреляционного анализа."""
+    __tablename__ = "satellite_orbit_history"
+
+    id = db.Column(db.Integer, primary_key=True)
+    sat_id = db.Column(db.String(10), db.ForeignKey('satellite_meta.sat_id'), nullable=False, index=True)
+    epoch = db.Column(db.DateTime, nullable=False, index=True)
+    
+    # Элементы Кеплера
+    a = db.Column(db.Float)  # Большая полуось, км
+    e = db.Column(db.Float)  # Эксцентриситет
+    i = db.Column(db.Float)  # Наклонение, град
+    omega_node = db.Column(db.Float) # Долгота восх. узла (Omega)
+    arg_perigee = db.Column(db.Float) # Аргумент перигея (omega)
+    mean_anomaly = db.Column(db.Float) # Средняя аномалия (M)
+    
+    __table_args__ = (
+        db.UniqueConstraint("sat_id", "epoch", name="uix_sat_orbit_epoch"),
+    )
+
+    def as_dict(self):
+        return {
+            "sat_id": self.sat_id,
+            "epoch": self.epoch.isoformat(),
+            "a": self.a,
+            "e": self.e,
+            "i": self.i,
+            "omega_node": self.omega_node,
+            "arg_perigee": self.arg_perigee,
+            "mean_anomaly": self.mean_anomaly,
+            "altitude": self.a - 6371.0 if self.a else None
+        }
+
+
 class SatelliteStatusHistory(db.Model):
     """Официальная история состояний (здоровье/тех.обслуживание) из .hlt файлов."""
     __tablename__ = "satellite_status_history"
