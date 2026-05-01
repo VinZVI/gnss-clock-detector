@@ -90,3 +90,55 @@ def calculate_satellite_analytics(
         "noise_rms": round(rms, 4),
         "allan_variance": allan_variance
     }
+
+def calculate_orbit_correlation(
+    clock_results: List['DetectionResult'],
+    orbit_history: List[Dict]
+) -> Dict:
+    """
+    Рассчитывает корреляцию между аномалиями часов и орбитальными параметрами.
+    """
+    if not clock_results or not orbit_history:
+        return {}
+
+    # 1. Синхронизируем данные по времени
+    # Для каждой точки часов ищем ближайшую точку орбиты
+    matched = []
+    orbit_epochs = np.array([datetime.fromisoformat(o['epoch']).timestamp() for o in orbit_history])
+    
+    for c in clock_results:
+        c_ts = c.epoch.timestamp()
+        idx = np.argmin(np.abs(orbit_epochs - c_ts))
+        if np.abs(orbit_epochs[idx] - c_ts) < 3600: # порог 1 час
+            matched.append({
+                "is_outlier": c.is_outlier,
+                "score": c.score,
+                "residual": abs(c.clock_bias - c.median) if c.median is not None else 0,
+                "mean_anomaly": orbit_history[idx]['mean_anomaly'],
+                "altitude": orbit_history[idx]['a'] - 6371.0
+            })
+            
+    if len(matched) < 10:
+        return {}
+
+    # 2. Статистический анализ
+    anomalies = [m for m in matched if m['is_outlier']]
+    
+    # Распределение аномалий по орбите (M)
+    m_bins = np.linspace(0, 360, 13)
+    counts, _ = np.histogram([a['mean_anomaly'] for a in anomalies], bins=m_bins)
+    
+    # Корреляция Пирсона между высотой и шумом часов
+    altitudes = np.array([m['altitude'] for m in matched])
+    residuals = np.array([m['residual'] for m in matched])
+    
+    correlation_coeff = 0
+    if np.std(altitudes) > 0 and np.std(residuals) > 0:
+        correlation_coeff = np.corrcoef(altitudes, residuals)[0, 1]
+
+    return {
+        "anomaly_distribution": counts.tolist(),
+        "height_clock_correlation": round(float(correlation_coeff), 3),
+        "avg_altitude": round(float(np.mean(altitudes)), 1)
+    }
+

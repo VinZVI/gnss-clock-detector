@@ -203,6 +203,17 @@
   <div class="card" id="orbitCorrCard" style="display:none">
     <div class="card-header"><h2>Корреляция с орбитальной позицией</h2></div>
     <div class="card-body">
+      <div class="analytics-grid" style="margin-top:0; margin-bottom:20px;">
+        <div class="stat-card">
+          <div class="stat-label">Корреляция (Высота/Шум)</div>
+          <div class="stat-value" id="valOrbitCorr">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Средняя высота</div>
+          <div class="stat-value" id="valAvgAlt">—</div>
+          <span class="stat-unit">км</span>
+        </div>
+      </div>
       <div style="display:flex; gap:20px; flex-wrap:wrap">
         <div style="flex:1; min-width:300px; height:400px;">
           <canvas id="orbitChart"></canvas>
@@ -386,9 +397,15 @@ async function loadCorrelationData(from, to) {
     }
 
     card.style.display = 'block';
-    renderOrbitChart(data);
+    renderOrbitChart(data.anomalies);
     
-    document.getElementById('corrTable').querySelector('tbody').innerHTML = data.map(d => `
+    // Метрики
+    if (data.stats) {
+      document.getElementById('valOrbitCorr').textContent = data.stats.height_clock_correlation;
+      document.getElementById('valAvgAlt').textContent = data.stats.avg_altitude;
+    }
+
+    document.getElementById('corrTable').querySelector('tbody').innerHTML = data.anomalies.map(d => `
       <tr>
         <td>${d.epoch.replace('T',' ').slice(11,19)}</td>
         <td>${d.altitude.toFixed(0)}</td>
