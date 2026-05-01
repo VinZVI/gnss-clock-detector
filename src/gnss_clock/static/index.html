@@ -290,6 +290,18 @@ function goToSatelliteDetails() {
 
 // ── ETL Logic ─────────────────────────────────────────────────────
 
+// ── UI Helpers ───────────────────────────────────────────────────
+
+function formatEpoch(isoStr) {
+    if (!isoStr) return '—';
+    try {
+        const d = new Date(isoStr);
+        if (isNaN(d.getTime())) return isoStr;
+        const pad = n => String(n).padStart(2, '0');
+        return `${pad(d.getDate())}.${pad(d.getMonth()+1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    } catch(e) { return isoStr; }
+}
+
 async function runEtlProcess() {
     const source = document.getElementById('etlSourceSelect').value;
     const btn = document.getElementById('runEtlBtn');
@@ -348,7 +360,7 @@ async function loadEtlLogs() {
         if (!tbody) return;
         tbody.innerHTML = data.runs.map(r => `
             <tr>
-                <td>${r.started_at.replace('T',' ').slice(0,19)}</td>
+                <td>${formatEpoch(r.started_at)}</td>
                 <td style="font-family:monospace; font-size:0.75rem">${r.ftp_file || 'NASA API'}</td>
                 <td>${r.records_raw}</td>
                 <td>${r.records_new}</td>

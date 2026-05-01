@@ -209,36 +209,41 @@
   </div>
 
   <!-- Корреляция с орбитой -->
-  <div class="card" id="orbitCorrCard" style="display:none">
+  <div class="card" id="orbitCorrCard">
     <div class="card-header"><h2>Корреляция с орбитальной позицией</h2></div>
-    <div class="card-body">
-      <div class="analytics-grid" style="margin-top:0; margin-bottom:20px;">
-        <div class="stat-card">
-          <div class="stat-label">Корреляция (Высота/Шум)</div>
-          <div class="stat-value" id="valOrbitCorr">—</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Средняя высота</div>
-          <div class="stat-value" id="valAvgAlt">—</div>
-          <span class="stat-unit">км</span>
-        </div>
-      </div>
-      <div style="display:flex; gap:20px; flex-wrap:wrap">
-        <div style="flex:1; min-width:300px; height:400px;">
-          <canvas id="orbitChart"></canvas>
-        </div>
-        <div style="flex:1; min-width:300px;">
-          <p style="font-size:.85rem; color:#8b949e; margin-bottom:15px">
-            График показывает распределение аномалий по средней аномалии (0-360°). 
-            Это позволяет выявить зависимость сбоев от положения спутника на орбите.
-          </p>
-          <div class="table-wrap">
-            <table id="corrTable">
-              <thead><tr><th>Эпоха</th><th>Высота (км)</th><th>Позиция (M)</th></tr></thead>
-              <tbody></tbody>
-            </table>
+    <div class="card-body" id="orbitCorrBody">
+      <div id="orbitCorrData" style="display:none">
+        <div class="analytics-grid" style="margin-top:0; margin-bottom:20px;">
+          <div class="stat-card">
+            <div class="stat-label">Корреляция (Высота/Шум)</div>
+            <div class="stat-value" id="valOrbitCorr">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Средняя высота</div>
+            <div class="stat-value" id="valAvgAlt">—</div>
+            <span class="stat-unit">км</span>
           </div>
         </div>
+        <div style="display:flex; gap:20px; flex-wrap:wrap">
+          <div style="flex:1; min-width:300px; height:400px;">
+            <canvas id="orbitChart"></canvas>
+          </div>
+          <div style="flex:1; min-width:300px;">
+            <p style="font-size:.85rem; color:#8b949e; margin-bottom:15px">
+              График показывает распределение аномалий по средней аномалии (0-360°). 
+              Это позволяет выявить зависимость сбоев от положения спутника на орбите.
+            </p>
+            <div class="table-wrap">
+              <table id="corrTable">
+                <thead><tr><th>Эпоха</th><th>Высота (км)</th><th>Позиция (M)</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="orbitCorrEmpty" class="empty">
+        Нет данных для корреляции (требуются файлы .oe и наличие аномалий в выбранном периоде)
       </div>
     </div>
   </div>
@@ -262,6 +267,18 @@
 </div>
 
 <script>
+// ── UI Helpers ───────────────────────────────────────────────────
+
+function formatEpoch(isoStr) {
+    if (!isoStr) return '—';
+    try {
+        const d = new Date(isoStr);
+        if (isNaN(d.getTime())) return isoStr;
+        const pad = n => String(n).padStart(2, '0');
+        return `${pad(d.getDate())}.${pad(d.getMonth()+1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    } catch(e) { return isoStr; }
+}
+
 const GNSS_NAMES = { G: 'GPS', R: 'GLONASS', E: 'Galileo', C: 'BeiDou', J: 'QZSS', S: 'SBAS', I: 'NavIC' };
 const STATUS_LABELS = { 0: 'Здоров', 1: 'Не здоров', 3: 'Тех. обслуживание' };
 
@@ -447,23 +464,27 @@ function renderAdevChart(adev) {
 let orbitChart = null;
 
 async function loadCorrelationData(from, to) {
+  const dataEl  = document.getElementById('orbitCorrData');
+  const emptyEl = document.getElementById('orbitCorrEmpty');
+
   try {
     const res = await fetch(`/api/correlation/${satId}?from=${from}&to=${to}`);
     const data = await res.json();
-    const card = document.getElementById('orbitCorrCard');
 
-    if (!res.ok || !data.length) {
-      card.style.display = 'none';
+    if (!res.ok || !data.anomalies || !data.anomalies.length) {
+      dataEl.style.display = 'none';
+      emptyEl.style.display = 'block';
       return;
     }
 
-    card.style.display = 'block';
+    dataEl.style.display = 'block';
+    emptyEl.style.display = 'none';
+    
     renderOrbitChart(data.anomalies);
     
-    // Метрики
     if (data.stats) {
-      document.getElementById('valOrbitCorr').textContent = data.stats.height_clock_correlation;
-      document.getElementById('valAvgAlt').textContent = data.stats.avg_altitude;
+      document.getElementById('valOrbitCorr').textContent = data.stats.height_clock_correlation || '0';
+      document.getElementById('valAvgAlt').textContent   = data.stats.avg_altitude || '—';
     }
 
     document.getElementById('corrTable').querySelector('tbody').innerHTML = data.anomalies.map(d => `
@@ -476,6 +497,9 @@ async function loadCorrelationData(from, to) {
 
   } catch(e) {
     console.error('Correlation error:', e);
+    dataEl.style.display = 'none';
+    emptyEl.style.display = 'block';
+    emptyEl.textContent = 'Ошибка загрузки данных корреляции';
   }
 }
 
@@ -594,7 +618,7 @@ function renderAnomalyTable(anom) {
   document.getElementById('anomalyTable').innerHTML = anom.length
     ? anom.map(p => `
         <tr>
-          <td>${p.epoch ? new Date(p.epoch).toISOString().replace('T',' ').slice(0,19) : ''}</td>
+          <td>${formatEpoch(p.epoch)}</td>
           <td>${(p.clock_bias||0).toFixed(3)}</td>
           <td><span class="badge badge-anomaly">${p.score||0}</span></td>
           <td>${(p.median||0).toFixed(3)}</td>
@@ -621,11 +645,9 @@ async function loadHistory() {
       const code  = h.status_code;
       const label = STATUS_LABELS[code] ?? `Код ${code}`;
       const cls   = code === 0 ? 'status-healthy' : code === 1 ? 'status-unhealthy' : 'status-unknown';
-      const start = h.start_epoch ? h.start_epoch.replace('T', ' ').slice(0, 19) : '—';
-      const end   = h.end_epoch   ? h.end_epoch.replace('T', ' ').slice(0, 19)   : '—';
       return `<tr>
-        <td>${start}</td>
-        <td>${end}</td>
+        <td>${formatEpoch(h.start_epoch)}</td>
+        <td>${formatEpoch(h.end_epoch)}</td>
         <td class="${cls}">${label}</td>
         <td><span class="badge ${code === 0 ? 'badge-ok' : 'badge-anomaly'}">${code}</span></td>
       </tr>`;
